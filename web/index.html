@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpCompass — SOL Performance Estimator</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <header>
+        <h1>🧭 OpCompass</h1>
+        <span class="subtitle">GPU Operator SOL Performance Estimator</span>
+    </header>
+
+    <main>
+        <!-- ===== Left Panel: Configuration ===== -->
+        <aside id="config-panel">
+            <section class="card">
+                <h2>Configuration</h2>
+
+                <label for="operator-select">Operator</label>
+                <select id="operator-select">
+                    <option value="">Loading...</option>
+                </select>
+
+                <label for="hardware-select">Hardware</label>
+                <select id="hardware-select">
+                    <option value="">Loading...</option>
+                </select>
+
+                <label for="dtype-select">Data Type</label>
+                <select id="dtype-select">
+                    <option value="fp16">FP16</option>
+                    <option value="bf16">BF16</option>
+                    <option value="tf32">TF32</option>
+                    <option value="fp32">FP32</option>
+                    <option value="fp64">FP64</option>
+                    <option value="int8">INT8</option>
+                </select>
+
+                <label for="mode-select">Analysis Mode</label>
+                <select id="mode-select">
+                    <option value="hierarchy">Hierarchy (recommended)</option>
+                    <option value="simple">Simple (roofline)</option>
+                    <option value="pipeline">Pipeline</option>
+                </select>
+
+                <div id="dim-inputs">
+                    <!-- Dynamically populated based on operator selection -->
+                </div>
+
+                <button id="analyze-btn" class="btn-primary">🔍 Analyze</button>
+            </section>
+
+            <section class="card" id="hardware-info">
+                <h2>Hardware Specs</h2>
+                <div id="hw-spec-content">Select a hardware target.</div>
+            </section>
+        </aside>
+
+        <!-- ===== Right Panel: Results ===== -->
+        <section id="results-panel">
+            <div id="result-cards" class="card-row">
+                <div class="metric-card">
+                    <div class="metric-label">SOL Time</div>
+                    <div class="metric-value" id="sol-time">—</div>
+                    <div class="metric-unit">µs</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Effective TFLOPS</div>
+                    <div class="metric-value" id="sol-tflops">—</div>
+                    <div class="metric-unit">TFLOPS</div>
+                </div>
+                <div class="metric-card" id="bottleneck-card">
+                    <div class="metric-label">Bottleneck</div>
+                    <div class="metric-value" id="sol-bottleneck">—</div>
+                </div>
+            </div>
+
+            <div class="card-row">
+                <div class="card chart-container">
+                    <h2>Time Breakdown</h2>
+                    <canvas id="breakdown-chart"></canvas>
+                </div>
+                <div class="card chart-container">
+                    <h2>Roofline Model</h2>
+                    <canvas id="roofline-chart"></canvas>
+                </div>
+            </div>
+
+            <div class="card" id="detail-table-container">
+                <h2>Detailed Metrics</h2>
+                <table id="detail-table">
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        OpCompass v0.1.0 — Theoretical upper-bound estimates only.
+    </footer>
+
+    <script src="/static/js/api.js"></script>
+    <script src="/static/js/charts.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
