@@ -44,8 +44,12 @@ def _discover(package_name: str, base_class: type) -> dict[str, type]:
                 and issubclass(attr, base_class)
                 and attr is not base_class
             ):
-                # Use the class's `name` attribute as key (every Operator / Hardware has one)
-                key: str = getattr(attr, "name", attr_name.lower())
+                # Use the class's `name` attribute as key (every Operator / Hardware has one).
+                # Skip intermediate base classes (e.g. NvidiaAmpere) that
+                # intentionally leave `name` empty to avoid registration.
+                key: str = getattr(attr, "name", "")
+                if not key:
+                    continue
                 found[key] = attr
 
     return found

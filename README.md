@@ -48,8 +48,14 @@ opcompass/
 │   │   └── reduction.py
 │   ├── hardware/             # One file per hardware target (pluggable)
 │   │   ├── base.py           #   Hardware abstract base class
-│   │   ├── nvidia_a100.py
-│   │   └── nvidia_h100.py
+│   │   ├── nvidia_ampere.py
+│   │   ├── nvidia_hopper.py
+│   │   ├── nvidia_fermi.py
+│   │   ├── nvidia_kepler.py
+│   │   ├── nvidia_maxwell.py
+│   │   ├── nvidia_pascal.py
+│   │   ├── nvidia_volta.py
+│   │   └── nvidia_turing.py
 │   ├── engine/               # Analysis engine
 │   │   ├── analyzer.py       #   Main SOL analysis orchestrator
 │   │   ├── memory_model.py   #   Multi-tier memory hierarchy model

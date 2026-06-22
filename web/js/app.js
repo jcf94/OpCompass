@@ -39,9 +39,12 @@ async function init() {
         .map(op => `<option value="${op.name}">${op.name} — ${op.description}</option>`)
         .join("");
 
-    // Populate hardware select
+    // Populate hardware select (sorted by SM version desc from API)
     $hwSelect.innerHTML = hardware
-        .map(hw => `<option value="${hw.name}">${hw.name} (${hw.vendor})</option>`)
+        .map(hw => {
+            const smv = hw.sm_version ? ` · SM ${hw.sm_version}` : '';
+            return `<option value="${hw.name}">${hw.name.toUpperCase()} — ${hw.architecture || hw.vendor}${smv}</option>`;
+        })
         .join("");
 
     // Default: matmul + a100
@@ -60,7 +63,7 @@ function updateDimInputs() {
 
     $dimInputs.innerHTML = Object.entries(op.param_dims)
         .map(([dim, desc]) => `
-            <label for="dim-${dim}">${dim} <span style="font-weight:400;text-transform:none">(${desc})</span></label>
+            <label for="dim-${dim}">${dim} <span class="dim-desc">${desc}</span></label>
             <input id="dim-${dim}" type="number" value="${getDefaultDim(dim)}" min="1" step="1">
         `)
         .join("");
@@ -101,20 +104,20 @@ async function updateHardwareInfo() {
                 if (flops >= 1e12) display = (flops / 1e12).toFixed(0) + " TFLOPS";
                 else if (flops >= 1e9) display = (flops / 1e9).toFixed(1) + " GFLOPS";
                 else display = flops;
-                return `<div class="spec-row"><span class="spec-label">Peak ${dt.toUpperCase()}</span><span>${display}</span></div>`;
+                return `<div class="spec-row"><span class="spec-label">Peak ${dt.toUpperCase()}</span><span class="spec-value">${display}</span></div>`;
             })
             .join("");
 
         $hwSpec.innerHTML = `
-            <p style="margin-bottom:0.5rem"><strong>${detail.vendor} ${detail.name}</strong></p>
-            <div class="spec-row"><span class="spec-label">Compute Units</span><span>${cu.count} ${cu.name}s @ ${cu.clock_mhz} MHz</span></div>
+            <p style="margin-bottom:0.5rem;font-family:var(--font-mono);font-size:0.85rem;font-weight:600;color:var(--text-emphasis)">${detail.vendor} ${detail.name.toUpperCase()}</p>
+            <div class="spec-row"><span class="spec-label">Compute Units</span><span class="spec-value">${cu.count} ${cu.name}s @ ${cu.clock_mhz} MHz</span></div>
             ${detail.memory_tiers.map(t => `
-                <div class="spec-row"><span class="spec-label">${t.name}</span><span>${t.capacity_gb.toFixed(0)} GB, ${t.bandwidth_gb_s.toFixed(0)} GB/s</span></div>
+                <div class="spec-row"><span class="spec-label">${t.name}</span><span class="spec-value">${t.capacity_gb.toFixed(0)} GB, ${t.bandwidth_gb_s.toFixed(0)} GB/s</span></div>
             `).join("")}
             ${peakRows}
         `;
     } catch (err) {
-        $hwSpec.innerHTML = `<p style="color:var(--danger)">Error loading specs.</p>`;
+        $hwSpec.innerHTML = `<p style="color:var(--bottleneck)">Error loading specs.</p>`;
     }
 }
 
@@ -126,7 +129,7 @@ async function runAnalysis() {
     const mode = $modeSelect.value;
     const dims = collectDims();
 
-    $analyzeBtn.textContent = "⏳ Analyzing...";
+    $analyzeBtn.textContent = "Analyzing…";
     $analyzeBtn.disabled = true;
 
     try {
@@ -137,7 +140,7 @@ async function runAnalysis() {
         console.error("Analysis failed:", err);
         alert("Analysis failed: " + err.message);
     } finally {
-        $analyzeBtn.textContent = "🔍 Analyze";
+        $analyzeBtn.textContent = "Run Analysis";
         $analyzeBtn.disabled = false;
     }
 }
@@ -197,6 +200,31 @@ function formatBytes(n) {
     if (n >= 1e3) return (n / 1e3).toFixed(2) + " KB";
     return n + " B";
 }
+
+// ── Tab navigation ─────────────────────────────────────────────
+const $tabBtns = document.querySelectorAll(".tab-btn");
+const $pages = document.querySelectorAll(".page");
+
+function switchTab(tabName) {
+    $tabBtns.forEach(btn => btn.classList.toggle("active", btn.dataset.tab === tabName));
+    $pages.forEach(page => page.classList.toggle("active", page.id === `page-${tabName}`));
+
+    // Lazy-init hardware page on first visit
+    if (tabName === "hardware" && typeof initHardwarePage === "function" && !window._hwPageInited) {
+        window._hwPageInited = true;
+        initHardwarePage();
+    }
+
+    // Lazy-init overview page on first visit
+    if (tabName === "overview" && typeof initOverviewPage === "function" && !window._overviewPageInited) {
+        window._overviewPageInited = true;
+        initOverviewPage();
+    }
+}
+
+$tabBtns.forEach(btn => {
+    btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+});
 
 // ── Event listeners ────────────────────────────────────────────
 $opSelect.addEventListener("change", updateDimInputs);

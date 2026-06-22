@@ -1,33 +1,41 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OpCompass — SOL Performance Estimator</title>
+    <title>OpCompass — GPU Operator SOL Estimator</title>
     <link rel="stylesheet" href="/static/css/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
-    <header>
-        <h1>🧭 OpCompass</h1>
-        <span class="subtitle">GPU Operator SOL Performance Estimator</span>
-    </header>
 
-    <main>
-        <!-- ===== Left Panel: Configuration ===== -->
+<header>
+    <div class="header-brand">
+        <h1>OpCompass</h1>
+        <span class="subtitle">GPU Operator SOL Estimator</span>
+    </div>
+    <nav id="tab-nav">
+        <button class="tab-btn active" data-tab="overview">Overview</button>
+        <button class="tab-btn" data-tab="hardware">Hardware</button>
+        <button class="tab-btn" data-tab="analyze">Analyze</button>
+    </nav>
+</header>
+
+<main>
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- ANALYZE PAGE                                               -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <div id="page-analyze" class="page">
+
         <aside id="config-panel">
             <section class="card">
                 <h2>Configuration</h2>
 
                 <label for="operator-select">Operator</label>
-                <select id="operator-select">
-                    <option value="">Loading...</option>
-                </select>
+                <select id="operator-select"><option value="">Loading…</option></select>
 
-                <label for="hardware-select">Hardware</label>
-                <select id="hardware-select">
-                    <option value="">Loading...</option>
-                </select>
+                <label for="hardware-select">Target Hardware</label>
+                <select id="hardware-select"><option value="">Loading…</option></select>
 
                 <label for="dtype-select">Data Type</label>
                 <select id="dtype-select">
@@ -46,11 +54,9 @@
                     <option value="pipeline">Pipeline</option>
                 </select>
 
-                <div id="dim-inputs">
-                    <!-- Dynamically populated based on operator selection -->
-                </div>
+                <div id="dim-inputs"><!-- dynamic --></div>
 
-                <button id="analyze-btn" class="btn-primary">🔍 Analyze</button>
+                <button id="analyze-btn" class="btn-primary">Run Analysis</button>
             </section>
 
             <section class="card" id="hardware-info">
@@ -59,15 +65,14 @@
             </section>
         </aside>
 
-        <!-- ===== Right Panel: Results ===== -->
         <section id="results-panel">
-            <div id="result-cards" class="card-row">
-                <div class="metric-card">
+            <div id="result-cards">
+                <div class="metric-card" id="sol-time-card">
                     <div class="metric-label">SOL Time</div>
                     <div class="metric-value" id="sol-time">—</div>
-                    <div class="metric-unit">µs</div>
+                    <div class="metric-unit">&micro;s</div>
                 </div>
-                <div class="metric-card">
+                <div class="metric-card" id="sol-tflops-card">
                     <div class="metric-label">Effective TFLOPS</div>
                     <div class="metric-value" id="sol-tflops">—</div>
                     <div class="metric-unit">TFLOPS</div>
@@ -91,19 +96,84 @@
 
             <div class="card" id="detail-table-container">
                 <h2>Detailed Metrics</h2>
-                <table id="detail-table">
-                    <tbody></tbody>
-                </table>
+                <table id="detail-table"><tbody></tbody></table>
             </div>
         </section>
-    </main>
+    </div>
 
-    <footer>
-        OpCompass v0.1.0 — Theoretical upper-bound estimates only.
-    </footer>
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- HARDWARE PAGE                                              -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <div id="page-hardware" class="page">
+        <aside id="hw-page-sidebar">
+            <section class="card">
+                <h2>Select Hardware</h2>
+                <select id="hw-page-select"><option value="">Loading…</option></select>
+            </section>
 
-    <script src="/static/js/api.js"></script>
-    <script src="/static/js/charts.js"></script>
-    <script src="/static/js/app.js"></script>
+            <section class="card" id="hw-overview-card">
+                <h2>Overview</h2>
+                <div id="hw-overview-content"></div>
+            </section>
+
+            <section class="card" id="hw-memory-card">
+                <h2>Memory Hierarchy</h2>
+                <div id="hw-memory-content"></div>
+            </section>
+        </aside>
+
+        <section id="hw-detail-panel">
+            <!-- Pipeline: now rendered as HTML/CSS flow, not SVG -->
+            <div class="card" id="pipeline-card">
+                <h2>SM Pipeline Architecture</h2>
+                <div id="pipeline-flow-container">
+                    <!-- dynamically rendered -->
+                </div>
+                <div id="pipeline-legend"><!-- dynamically rendered --></div>
+            </div>
+
+            <div class="card-row">
+                <div class="card" id="sm-arch-card">
+                    <h2>SM Internal Architecture</h2>
+                    <div id="sm-arch-content"></div>
+                </div>
+                <div class="card" id="concurrent-card">
+                    <h2>Concurrent Execution</h2>
+                    <div id="concurrent-content"></div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- OVERVIEW PAGE — side-by-side hardware comparison           -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <div id="page-overview" class="page active">
+        <div id="overview-container">
+            <div class="card" id="overview-card">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--space-lg)">
+                    <h2 style="margin-bottom:0">Hardware Comparison</h2>
+                    <span id="overview-count" style="font-family:var(--font-mono);font-size:var(--text-xs);color:var(--text-dim)"></span>
+                </div>
+                <div id="overview-table-wrapper">
+                    <table id="overview-table">
+                        <thead></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</main>
+
+<footer>
+    OpCompass v0.1.0 — Theoretical upper-bound estimates
+</footer>
+
+<script src="/static/js/api.js"></script>
+<script src="/static/js/charts.js"></script>
+<script src="/static/js/hardware.js"></script>
+<script src="/static/js/overview.js"></script>
+<script src="/static/js/app.js"></script>
 </body>
 </html>

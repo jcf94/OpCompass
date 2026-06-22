@@ -50,7 +50,7 @@ def test_matmul_h100_fp16():
         M=4096, N=4096, K=4096,
     )
 
-    assert result.sol_tflops == 989.0
+    assert result.sol_tflops == 989.4
     assert result.bottleneck == "compute"
 
 

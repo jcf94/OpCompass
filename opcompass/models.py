@@ -87,6 +87,30 @@ class ComputeUnit:
     pipeline: list[PipelineStage] = field(default_factory=list)
     max_concurrent_warps: int = 0
 
+    # ── Per-unit memory resources ──────────────────────────────────
+    register_file_kb: int = 0               # Register file size per compute unit
+    shared_memory_max_kb: int = 0           # Max configurable shared memory per unit
+    l1_shared_combined_kb: int = 0          # Combined L1 + shared memory capacity per unit
+
+    # ── Per-unit execution resources ───────────────────────────────
+    warp_schedulers_per_unit: int = 0       # Number of warp schedulers
+    tensor_cores_per_unit: int = 0          # Tensor Cores per compute unit
+    fp32_cores_per_unit: int = 0            # FP32 (CUDA) cores per unit
+    fp64_cores_per_unit: int = 0            # FP64 cores per unit
+    int32_cores_per_unit: int = 0           # INT32 cores per unit
+    ldst_units: int = 0                     # Load/Store units
+    sfu_units: int = 0                      # Special Function Units
+
+    # ── Threading / occupancy limits ───────────────────────────────
+    max_threads_per_unit: int = 0           # Max resident threads
+    max_thread_blocks_per_unit: int = 0     # Max resident thread blocks
+    max_registers_per_thread: int = 0       # Register file granularity
+    max_registers_per_block: int = 0        # Max registers allocatable per block
+
+    # ── Parallel / concurrent execution capabilities ───────────────
+    can_concurrent_fp32_int32: bool = False  # Simultaneous FP32 + INT32 issue
+    threads_per_warp: int = 32               # Typically 32 for NVIDIA GPUs
+
 
 @dataclass
 class SubOp:

@@ -1,6 +1,6 @@
 """Test A100 hardware definition."""
 
-from opcompass.hardware.nvidia_a100 import NvidiaA100
+from opcompass.hardware.nvidia_ampere import NvidiaA100
 from opcompass.models import DataType
 
 

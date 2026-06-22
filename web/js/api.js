@@ -29,6 +29,9 @@ const API = {
     /** Fetch detailed info for one hardware target. */
     getHardwareDetail(name) { return this._get(`/hardware/${encodeURIComponent(name)}`); },
 
+    /** Fetch full comparison overview of all hardware targets. */
+    getHardwareOverview() { return this._get("/hardware/overview"); },
+
     /** Run a SOL analysis. */
     analyze(operator, hardware, dtype, mode, dims) {
         return this._post("/analyze", {
