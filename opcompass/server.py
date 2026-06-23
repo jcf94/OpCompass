@@ -21,7 +21,7 @@ from opcompass.registry import (
     get_hardware,
     get_operator,
 )
-from opcompass.models import AnalysisMode, DataType
+from opcompass.models import AnalysisMode, DataType, PipelineConfig
 from opcompass.engine.analyzer import Analyzer
 from opcompass.engine.result import _result_to_dict
 
@@ -266,6 +266,7 @@ def api_analyze(body: Dict[str, Any]) -> Dict[str, Any]:
     dtype_str = body.get("dtype", "fp16")
     mode_str = body.get("mode", "hierarchy")
     dims = body.get("dims", {})
+    pipeline_config_dict = body.get("pipeline_config", None)
 
     if not operator_name:
         raise HTTPException(status_code=400, detail="Missing 'operator'")
@@ -292,11 +293,19 @@ def api_analyze(body: Dict[str, Any]) -> Dict[str, Any]:
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Unknown mode '{mode_str}'")
 
+    # Parse pipeline_config for pipeline mode
+    pipeline_config = None
+    if pipeline_config_dict and mode == AnalysisMode.PIPELINE:
+        pipeline_config = PipelineConfig(
+            async_copy_enabled=pipeline_config_dict.get("async_copy_enabled", True),
+            sparsity_2_4_enabled=pipeline_config_dict.get("sparsity_2_4_enabled", False),
+        )
+
     op = op_cls()
     hw = hw_cls()
 
     analyzer = Analyzer()
-    result = analyzer.analyze(op, hw, dtype, mode=mode, **dims)
+    result = analyzer.analyze(op, hw, dtype, mode=mode, pipeline_config=pipeline_config, **dims)
 
     return _result_to_dict(result)
 

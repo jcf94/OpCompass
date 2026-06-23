@@ -33,7 +33,7 @@ def format_result(result: AnalysisResult, fmt: str = "table") -> str:
 # ---------------------------------------------------------------------------
 
 def _result_to_dict(result: AnalysisResult) -> dict:
-    return {
+    d = {
         "operator": result.operator,
         "hardware": result.hardware,
         "shapes": result.shapes,
@@ -48,7 +48,55 @@ def _result_to_dict(result: AnalysisResult) -> dict:
         "sol_time_us": result.sol_time_s * 1e6,
         "sol_tflops": result.sol_tflops,
         "bottleneck": result.bottleneck,
+        "stage_breakdown": result.stage_breakdown,
     }
+
+    # Pipeline-specific fields
+    if result.pipeline_schedule is not None:
+        ps = result.pipeline_schedule
+        d["pipeline_schedule"] = {
+            "sub_ops": [
+                {
+                    "name": sop.name,
+                    "pipeline_stage": sop.pipeline_stage,
+                    "start_cycle": sop.start_cycle,
+                    "end_cycle": sop.end_cycle,
+                    "duration_cycles": sop.duration_cycles,
+                    "work_units": sop.work_units,
+                    "iteration": sop.iteration,
+                }
+                for sop in ps.sub_ops
+            ],
+            "total_cycles_per_block": ps.total_cycles_per_block,
+            "total_time_s": ps.total_time_s,
+            "total_time_us": ps.total_time_s * 1e6,
+            "wave_count": ps.wave_count,
+            "grid_size": ps.grid_size,
+            "num_k_iterations": ps.num_k_iterations,
+            "bottleneck_stage": ps.bottleneck_stage,
+            "per_iteration_cycles": ps.per_iteration_cycles,
+            "prologue_cycles": ps.prologue_cycles,
+            "epilogue_cycles": ps.epilogue_cycles,
+        }
+
+    if result.tiling_info is not None:
+        ti = result.tiling_info
+        d["tiling_info"] = {
+            "block_m": ti.block_m,
+            "block_n": ti.block_n,
+            "block_k": ti.block_k,
+            "shared_memory_per_block": ti.shared_memory_per_block,
+            "num_warps_per_block": ti.num_warps_per_block,
+        }
+
+    if result.pipeline_config is not None:
+        pc = result.pipeline_config
+        d["pipeline_config"] = {
+            "async_copy_enabled": pc.async_copy_enabled,
+            "sparsity_2_4_enabled": pc.sparsity_2_4_enabled,
+        }
+
+    return d
 
 
 def _format_table(result: AnalysisResult) -> str:
@@ -79,6 +127,37 @@ def _format_table(result: AnalysisResult) -> str:
         f"  ★ Bottleneck : {result.bottleneck}",
         "═" * 65,
     ]
+
+    # Add pipeline-specific info
+    if result.pipeline_schedule is not None:
+        ps = result.pipeline_schedule
+        lines += [
+            "─" * 65,
+            "  Pipeline Details:",
+            f"  K iterations      : {ps.num_k_iterations}",
+            f"  Grid size         : {ps.grid_size} blocks",
+            f"  Wave count        : {ps.wave_count}",
+            f"  Prologue cycles   : {ps.prologue_cycles}",
+            f"  Per-iter cycles   : {ps.per_iteration_cycles}",
+            f"  Epilogue cycles   : {ps.epilogue_cycles}",
+            f"  Total cycles/block: {ps.total_cycles_per_block}",
+            f"  Bottleneck stage  : {ps.bottleneck_stage}",
+        ]
+        if result.tiling_info is not None:
+            ti = result.tiling_info
+            lines += [
+                f"  Tiling (bM×bN×bK) : {ti.block_m}×{ti.block_n}×{ti.block_k}",
+                f"  Shared mem/block  : {ti.shared_memory_per_block} bytes",
+                f"  Warps/block       : {ti.num_warps_per_block}",
+            ]
+        if result.pipeline_config is not None:
+            pc = result.pipeline_config
+            lines += [
+                f"  Async copy        : {'ON' if pc.async_copy_enabled else 'OFF'}",
+                f"  2:4 Sparsity      : {'ON' if pc.sparsity_2_4_enabled else 'OFF'}",
+            ]
+        lines += ["═" * 65]
+
     return "\n".join(lines)
 
 

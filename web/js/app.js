@@ -15,6 +15,9 @@ const $modeSelect = document.getElementById("mode-select");
 const $dimInputs = document.getElementById("dim-inputs");
 const $analyzeBtn = document.getElementById("analyze-btn");
 const $hwSpec = document.getElementById("hw-spec-content");
+const $pipelineConfig = document.getElementById("pipeline-config");
+const $asyncCopyToggle = document.getElementById("async-copy-toggle");
+const $sparsityToggle = document.getElementById("sparsity-toggle");
 
 const $solTime = document.getElementById("sol-time");
 const $solTflops = document.getElementById("sol-tflops");
@@ -121,6 +124,23 @@ async function updateHardwareInfo() {
     }
 }
 
+// ── Pipeline config toggle ─────────────────────────────────────
+function togglePipelineConfig() {
+    if ($modeSelect.value === "pipeline") {
+        $pipelineConfig.classList.remove("hidden");
+    } else {
+        $pipelineConfig.classList.add("hidden");
+    }
+}
+
+function collectPipelineConfig() {
+    if ($modeSelect.value !== "pipeline") return null;
+    return {
+        async_copy_enabled: $asyncCopyToggle.checked,
+        sparsity_2_4_enabled: $sparsityToggle.checked,
+    };
+}
+
 // ── Analyze ────────────────────────────────────────────────────
 async function runAnalysis() {
     const opName = $opSelect.value;
@@ -128,12 +148,13 @@ async function runAnalysis() {
     const dtype = $dtypeSelect.value;
     const mode = $modeSelect.value;
     const dims = collectDims();
+    const pipelineConfig = collectPipelineConfig();
 
     $analyzeBtn.textContent = "Analyzing…";
     $analyzeBtn.disabled = true;
 
     try {
-        const result = await API.analyze(opName, hwName, dtype, mode, dims);
+        const result = await API.analyze(opName, hwName, dtype, mode, dims, pipelineConfig);
         currentResult = result;
         renderResults(result);
     } catch (err) {
@@ -184,6 +205,11 @@ function renderResults(data) {
         peak_bandwidth: peakBw,
         achievable_flops: achievable,
     }, data);
+
+    // Pipeline-specific rendering
+    if (typeof PipelineUI !== "undefined") {
+        PipelineUI.render(data);
+    }
 }
 
 // ── Helpers ────────────────────────────────────────────────────
@@ -229,7 +255,9 @@ $tabBtns.forEach(btn => {
 // ── Event listeners ────────────────────────────────────────────
 $opSelect.addEventListener("change", updateDimInputs);
 $hwSelect.addEventListener("change", updateHardwareInfo);
+$modeSelect.addEventListener("change", togglePipelineConfig);
 $analyzeBtn.addEventListener("click", runAnalysis);
 
 // ── Boot ──────────────────────────────────────────────────────
 init();
+togglePipelineConfig();

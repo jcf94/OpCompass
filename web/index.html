@@ -54,6 +54,20 @@
                     <option value="pipeline">Pipeline</option>
                 </select>
 
+                <div id="pipeline-config" class="pipeline-config-section hidden">
+                    <h3>Pipeline Options</h3>
+                    <label class="toggle-label">
+                        <span>Async Copy (CP.async)</span>
+                        <input type="checkbox" id="async-copy-toggle" checked>
+                        <span class="toggle-switch"></span>
+                    </label>
+                    <label class="toggle-label">
+                        <span>2:4 Sparsity</span>
+                        <input type="checkbox" id="sparsity-toggle">
+                        <span class="toggle-switch"></span>
+                    </label>
+                </div>
+
                 <div id="dim-inputs"><!-- dynamic --></div>
 
                 <button id="analyze-btn" class="btn-primary">Run Analysis</button>
@@ -97,6 +111,34 @@
             <div class="card" id="detail-table-container">
                 <h2>Detailed Metrics</h2>
                 <table id="detail-table"><tbody></tbody></table>
+            </div>
+
+            <div id="pipeline-results" class="hidden">
+                <div class="card-row pipeline-stats-row">
+                    <div class="card">
+                        <h2>Pipeline Schedule</h2>
+                        <div id="pipeline-stats-content"></div>
+                    </div>
+                    <div class="card">
+                        <h2>Tiling Strategy</h2>
+                        <div id="tiling-info-content"></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>Pipeline Gantt Chart</h2>
+                    <div id="gantt-chart-container">
+                        <canvas id="gantt-chart"></canvas>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>Stage Breakdown</h2>
+                    <table id="pipeline-stage-table">
+                        <thead><tr><th>Stage</th><th>Time</th><th>Work Units</th><th>Iteration</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
             </div>
         </section>
     </div>
@@ -172,6 +214,7 @@
 
 <script src="/static/js/api.js"></script>
 <script src="/static/js/charts.js"></script>
+<script src="/static/js/pipeline.js"></script>
 <script src="/static/js/hardware.js"></script>
 <script src="/static/js/overview.js"></script>
 <script src="/static/js/app.js"></script>

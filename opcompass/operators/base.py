@@ -43,19 +43,30 @@ class Operator(ABC):
     # Optional hooks — override these for finer-grained analysis
     # ------------------------------------------------------------------
 
-    def get_ops_breakdown(self, **dims: int) -> list[SubOp]:
+    def get_ops_breakdown(self, dtype=None, hardware=None, pipeline_config=None, **dims: int) -> list[SubOp]:
         """Decompose this operator into a sequence of sub-operations.
 
         Used by the *pipeline* analysis mode.  Default returns an
         empty list, which means the engine falls back to a simpler model.
+
+        Args:
+            dtype: Data type for the computation.
+            hardware: Target hardware (provides pipeline stages).
+            pipeline_config: Feature toggles (async copy, sparsity, etc.).
+            **dims: Problem dimensions (e.g., M, N, K for matmul).
         """
         return []
 
     def get_tiling_strategy(
-        self, hardware: "Hardware", **dims: int
+        self, hardware: "Hardware", dtype=None, **dims: int
     ) -> TilingInfo | None:
         """Suggest a tiling / blocking strategy for the given hardware.
 
         Default returns None (engine uses a naïve strategy).
+
+        Args:
+            hardware: Target hardware (provides SM resources for constraint checks).
+            dtype: Data type for the computation.
+            **dims: Problem dimensions.
         """
         return None

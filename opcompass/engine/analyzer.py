@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from opcompass.models import AnalysisMode, AnalysisResult, DataType
+    from opcompass.models import AnalysisMode, AnalysisResult, DataType, PipelineConfig
     from opcompass.operators.base import Operator
     from opcompass.hardware.base import Hardware
 
@@ -17,6 +17,13 @@ class Analyzer:
 
         analyzer = Analyzer()
         result = analyzer.analyze(matmul_op, a100_hw, dtype=DataType.FP16, M=4096, N=4096, K=4096)
+
+    For pipeline mode with feature toggles::
+
+        config = PipelineConfig(async_copy_enabled=True, sparsity_2_4_enabled=False)
+        result = analyzer.analyze(matmul_op, a100_hw, dtype=DataType.FP16,
+                                  mode=AnalysisMode.PIPELINE, pipeline_config=config,
+                                  M=4096, N=4096, K=4096)
     """
 
     def analyze(
@@ -25,14 +32,20 @@ class Analyzer:
         hardware: Hardware,
         dtype: DataType,
         mode: AnalysisMode | None = None,
+        pipeline_config: PipelineConfig | None = None,
         **dims: int,
     ) -> AnalysisResult:
         """Run SOL analysis and return an ``AnalysisResult``."""
-        from opcompass.models import AnalysisMode, AnalysisResult
+        from opcompass.models import AnalysisMode, AnalysisResult, PipelineConfig
 
         if mode is None:
             mode = AnalysisMode.HIERARCHY
 
+        # ── Pipeline mode: use the new DAG-based scheduler ────────────
+        if mode == AnalysisMode.PIPELINE:
+            return self._analyze_pipeline(operator, hardware, dtype, pipeline_config, dims)
+
+        # ── SIMPLE / HIERARCHY modes: unchanged ───────────────────────
         # 1. Fundamental quantities — always from the operator
         total_flops = operator.compute_flops(**dims)
         read_bytes, write_bytes = operator.compute_io_bytes(dtype, **dims)
@@ -91,6 +104,97 @@ class Analyzer:
         return result
 
     # ------------------------------------------------------------------
+    # Pipeline mode
+    # ------------------------------------------------------------------
+
+    def _analyze_pipeline(
+        self, operator, hardware, dtype, pipeline_config, dims
+    ) -> AnalysisResult:
+        """Run pipeline analysis using DAG-based scheduling."""
+        from opcompass.models import AnalysisMode, AnalysisResult, PipelineConfig
+        from opcompass.engine.pipeline_model import schedule_pipeline
+
+        # Default config if not provided
+        if pipeline_config is None:
+            pipeline_config = PipelineConfig()
+
+        # Get tiling strategy
+        tiling = operator.get_tiling_strategy(hardware, dtype, **dims)
+
+        # Get sub-op decomposition
+        sub_ops = operator.get_ops_breakdown(dtype, hardware, pipeline_config, **dims)
+
+        # Fallback to HIERARCHY if operator doesn't support pipeline
+        if not sub_ops or not tiling:
+            total_flops = operator.compute_flops(**dims)
+            read_bytes, write_bytes = operator.compute_io_bytes(dtype, **dims)
+            mem_read_time = self._estimate_memory_time(read_bytes, hardware, AnalysisMode.HIERARCHY)
+            compute_time = self._estimate_compute_time(total_flops, hardware, dtype, AnalysisMode.HIERARCHY)
+            mem_write_time = self._estimate_memory_time(write_bytes, hardware, AnalysisMode.HIERARCHY)
+            overlap = hardware.memory.can_overlap_with_compute
+            sol_time = max(compute_time, mem_read_time, mem_write_time) if overlap else (mem_read_time + compute_time + mem_write_time)
+            times = {"memory_read": mem_read_time, "compute": compute_time, "memory_write": mem_write_time}
+            bottleneck = max(times, key=times.get)
+
+            return AnalysisResult(
+                operator=operator.name, hardware=hardware.name,
+                shapes=dims, dtype=dtype, mode=AnalysisMode.PIPELINE,
+                total_flops=total_flops,
+                total_read_bytes=read_bytes, total_write_bytes=write_bytes,
+                memory_read_time_s=mem_read_time,
+                compute_time_s=compute_time,
+                memory_write_time_s=mem_write_time,
+                bottleneck=bottleneck, sol_time_s=sol_time,
+                sol_tflops=(total_flops / sol_time / 1e12) if sol_time > 0 else float("inf"),
+                stage_breakdown={"read": mem_read_time, "compute": compute_time, "write": mem_write_time},
+            )
+
+        # Schedule pipeline
+        schedule = schedule_pipeline(sub_ops, hardware, pipeline_config, tiling, **dims)
+
+        # Build per-stage breakdown from the schedule
+        total_flops = operator.compute_flops(**dims)
+        read_bytes, write_bytes = operator.compute_io_bytes(dtype, **dims)
+        clock_s = 1.0 / (hardware.compute_unit.clock_mhz * 1e6)
+
+        stage_breakdown = {}
+        for sop in schedule.sub_ops:
+            stage = sop.pipeline_stage
+            stage_breakdown[stage] = stage_breakdown.get(stage, 0) + sop.duration_cycles * clock_s
+
+        sol_time = schedule.total_time_s
+        sol_tflops = (total_flops / sol_time / 1e12) if sol_time > 0 else float("inf")
+
+        # Also compute the traditional read/compute/write breakdown
+        mem_read_time = self._estimate_memory_time(read_bytes, hardware, AnalysisMode.HIERARCHY)
+        compute_time = self._estimate_compute_time(total_flops, hardware, dtype, AnalysisMode.HIERARCHY)
+        mem_write_time = self._estimate_memory_time(write_bytes, hardware, AnalysisMode.HIERARCHY)
+
+        return AnalysisResult(
+            operator=operator.name,
+            hardware=hardware.name,
+            shapes=dims,
+            dtype=dtype,
+            mode=AnalysisMode.PIPELINE,
+            total_flops=total_flops,
+            total_read_bytes=read_bytes,
+            total_write_bytes=write_bytes,
+            memory_read_time_s=mem_read_time,
+            compute_time_s=compute_time,
+            memory_write_time_s=mem_write_time,
+            bottleneck=schedule.bottleneck_stage,
+            sol_time_s=sol_time,
+            sol_tflops=sol_tflops,
+            stage_breakdown=stage_breakdown,
+            roofline_data=self._build_roofline_data(
+                total_flops, read_bytes + write_bytes, hardware, dtype
+            ),
+            pipeline_schedule=schedule,
+            pipeline_config=pipeline_config,
+            tiling_info=tiling,
+        )
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
@@ -108,8 +212,7 @@ class Analyzer:
             bw = hardware.hbm_bandwidth
             return byte_count / bw if bw > 0 else 0.0
 
-        # HIERARCHY / PIPELINE: use the first (slowest) tier for now;
-        # a more sophisticated model would model reuse at each tier.
+        # HIERARCHY: use the first (slowest) tier
         tiers = hardware.memory.tiers
         if tiers:
             return tiers[tier_index].transfer_time(byte_count)
@@ -126,7 +229,6 @@ class Analyzer:
         if peak <= 0:
             return float("inf")
 
-        # A simple utilization factor — can be refined per-hardware
         utilization = 1.0
         return flops / (peak * utilization)
 

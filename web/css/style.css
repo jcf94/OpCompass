@@ -1152,6 +1152,162 @@ footer {
 }
 
 /* ═══════════════════════════════════════════════════════════════════
+   PIPELINE UI — Analyze page pipeline results
+   ═══════════════════════════════════════════════════════════════════ */
+
+.hidden { display: none !important; }
+
+/* ── Pipeline config toggles ─────────────────────────────────────── */
+.pipeline-config-section {
+  margin-top: var(--space);
+  padding: var(--space) var(--space-md);
+  background: var(--surface-inset);
+  border-radius: var(--radius-default);
+  border: 1px solid var(--border);
+}
+
+.pipeline-config-section h3 {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin: 0 0 var(--space) 0;
+}
+
+.toggle-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-xs) 0;
+  cursor: pointer;
+  font-size: var(--text-sm);
+  color: var(--text);
+  user-select: none;
+}
+
+.toggle-label span:first-child {
+  flex: 1;
+}
+
+.toggle-label input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  background: var(--border);
+  border-radius: 10px;
+  transition: background var(--duration-fast) var(--ease-out);
+  margin-left: var(--space);
+}
+
+.toggle-switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: var(--surface);
+  border-radius: 50%;
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.toggle-label input:checked + .toggle-switch {
+  background: var(--accent);
+}
+
+.toggle-label input:checked + .toggle-switch::after {
+  transform: translateX(16px);
+}
+
+.toggle-label input:focus-visible + .toggle-switch {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ── Pipeline stats row ──────────────────────────────────────────── */
+.pipeline-stats-row {
+  display: flex;
+  gap: var(--space);
+}
+
+.pipeline-stats-row .card {
+  flex: 1;
+}
+
+#pipeline-stats-content,
+#tiling-info-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+/* ── Gantt chart ─────────────────────────────────────────────────── */
+#gantt-chart-container {
+  width: 100%;
+  overflow-x: auto;
+  min-height: 200px;
+}
+
+#gantt-chart {
+  display: block;
+}
+
+/* ── Stage breakdown table ───────────────────────────────────────── */
+#pipeline-stage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+#pipeline-stage-table td {
+  padding: var(--space-xs) var(--space-sm);
+  border-bottom: 1px solid var(--border-light);
+  vertical-align: middle;
+}
+
+#pipeline-stage-table th {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  padding: var(--space-xs) var(--space-sm);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  font-weight: 500;
+}
+
+#pipeline-stage-table th:nth-child(n+2) {
+  text-align: right;
+}
+
+#pipeline-stage-table td.mono {
+  font-family: var(--font-mono);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.stage-badge {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  letter-spacing: 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
    ACCESSIBILITY & POLISH
    ═══════════════════════════════════════════════════════════════════ */
 

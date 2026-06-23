@@ -17,7 +17,7 @@ from typing import Any
 import click
 
 from opcompass.registry import discover_hardware, discover_operators, get_hardware, get_operator
-from opcompass.models import AnalysisMode, DataType
+from opcompass.models import AnalysisMode, DataType, PipelineConfig
 from opcompass.engine.analyzer import Analyzer
 from opcompass.engine.result import format_result
 
@@ -146,6 +146,8 @@ def info_cmd(operator_name: str):
 @click.option("--dtype", "-d", default="fp16", help="Data type (default: fp16)")
 @click.option("--mode", "-m", default="hierarchy", help="Analysis mode: simple, hierarchy, pipeline")
 @click.option("--format", "-f", "fmt", default="table", help="Output format: table, json, csv")
+@click.option("--async-copy/--no-async-copy", default=True, help="Enable/disable async copy (pipeline mode)")
+@click.option("--sparsity/--no-sparsity", default=False, help="Enable/disable 2:4 sparsity (pipeline mode)")
 @click.argument("operator_name")
 @click.pass_context
 def analyze_cmd(
@@ -154,6 +156,8 @@ def analyze_cmd(
     dtype: str,
     mode: str,
     fmt: str,
+    async_copy: bool,
+    sparsity: bool,
     operator_name: str,
 ):
     """Analyze SOL performance for an operator.
@@ -189,12 +193,21 @@ def analyze_cmd(
     resolved_dtype = _resolve_dtype(dtype)
     resolved_mode = _resolve_mode(mode)
 
+    # Build pipeline config if in pipeline mode
+    pipeline_config = None
+    if resolved_mode == AnalysisMode.PIPELINE:
+        pipeline_config = PipelineConfig(
+            async_copy_enabled=async_copy,
+            sparsity_2_4_enabled=sparsity,
+        )
+
     op_inst = op_cls()
     hw_inst = hw_cls()
 
     analyzer = Analyzer()
     result = analyzer.analyze(
-        op_inst, hw_inst, resolved_dtype, mode=resolved_mode, **dims
+        op_inst, hw_inst, resolved_dtype, mode=resolved_mode,
+        pipeline_config=pipeline_config, **dims
     )
 
     click.echo(format_result(result, fmt=fmt))
