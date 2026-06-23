@@ -192,6 +192,17 @@ def schedule_pipeline(
         if cu.shared_memory_max_kb > 0 and tiling.shared_memory_per_block > 0
         else cu.max_thread_blocks_per_unit
     )
+    register_file_regs = (cu.register_file_kb * 1024) // 4 if cu.register_file_kb > 0 else 0
+    blocks_by_register_file = (
+        register_file_regs // tiling.registers_per_block
+        if register_file_regs > 0 and tiling.registers_per_block > 0
+        else cu.max_thread_blocks_per_unit
+    )
+    blocks_by_register_block_limit = (
+        cu.max_registers_per_block // tiling.registers_per_block
+        if cu.max_registers_per_block > 0 and tiling.registers_per_block > 0
+        else cu.max_thread_blocks_per_unit
+    )
     resident_blocks_per_sm = max(
         1,
         min(
@@ -200,6 +211,8 @@ def schedule_pipeline(
                 blocks_by_threads,
                 blocks_by_warps,
                 blocks_by_smem,
+                blocks_by_register_file,
+                blocks_by_register_block_limit,
             )
             if x and x > 0
         ),

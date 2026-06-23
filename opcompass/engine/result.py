@@ -53,6 +53,24 @@ def _result_to_dict(result: AnalysisResult) -> dict:
     }
     if result.pipeline_memory_breakdown:
         d["pipeline_memory_breakdown"] = result.pipeline_memory_breakdown
+    if result.pipeline_candidates:
+        d["pipeline_candidates"] = [
+            {
+                "name": c.name,
+                "block_m": c.block_m,
+                "block_n": c.block_n,
+                "block_k": c.block_k,
+                "warp_count": c.warp_count,
+                "stage_count": c.stage_count,
+                "copy_path": c.copy_path,
+                "mma_path": c.mma_path,
+                "scheduling": c.scheduling,
+                "cta_order": c.cta_order,
+                "rejection_reason": c.rejection_reason,
+                "selected": i == 0 and not c.rejection_reason,
+            }
+            for i, c in enumerate(result.pipeline_candidates)
+        ]
 
     # Pipeline-specific fields
     if result.pipeline_schedule is not None:
@@ -90,6 +108,10 @@ def _result_to_dict(result: AnalysisResult) -> dict:
             "block_k": ti.block_k,
             "shared_memory_per_block": ti.shared_memory_per_block,
             "num_warps_per_block": ti.num_warps_per_block,
+            "stage_count": ti.stage_count,
+            "registers_per_thread": ti.registers_per_thread,
+            "registers_per_block": ti.registers_per_block,
+            "candidate_name": ti.candidate_name,
         }
 
     if result.pipeline_config is not None:
@@ -100,6 +122,8 @@ def _result_to_dict(result: AnalysisResult) -> dict:
             "block_m": pc.block_m,
             "block_n": pc.block_n,
             "block_k": pc.block_k,
+            "stage_count": pc.stage_count,
+            "warp_count": pc.warp_count,
         }
 
     # Solar-specific fields
@@ -231,10 +255,17 @@ def _format_table(result: AnalysisResult) -> str:
             ti = result.tiling_info
             lines += [
                 "",
+                f"  Candidate         : {ti.candidate_name or 'default'}",
                 f"  Tiling (bM×bN×bK) : {ti.block_m}×{ti.block_n}×{ti.block_k}",
                 f"  Shared mem/block  : {ti.shared_memory_per_block:,} bytes  ({ti.shared_memory_per_block / 1024:.0f} KB)",
                 f"  Warps/block       : {ti.num_warps_per_block}",
+                f"  Stage count       : {ti.stage_count}",
             ]
+            if ti.registers_per_thread:
+                lines += [
+                    f"  Registers/thread  : {ti.registers_per_thread}",
+                    f"  Registers/block   : {ti.registers_per_block:,}",
+                ]
         if result.pipeline_config is not None:
             pc = result.pipeline_config
             lines += [

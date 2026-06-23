@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -123,13 +124,62 @@ class Analyzer:
         if pipeline_config is None:
             pipeline_config = PipelineConfig()
 
-        # Get tiling strategy
-        tiling = operator.get_tiling_strategy(
-            hardware, dtype, pipeline_config=pipeline_config, **dims
-        )
+        pipeline_candidates = []
+        rejected_candidates = []
+        if hasattr(operator, "get_pipeline_candidates"):
+            rejected_candidates = operator.get_rejected_pipeline_candidates(
+                hardware, dtype, pipeline_config=pipeline_config, **dims
+            )
+            best = None
+            for candidate in operator.get_pipeline_candidates(
+                hardware, dtype, pipeline_config=pipeline_config, **dims
+            ):
+                candidate_config = replace(
+                    pipeline_config,
+                    block_m=candidate.block_m,
+                    block_n=candidate.block_n,
+                    block_k=candidate.block_k,
+                    stage_count=candidate.stage_count,
+                    warp_count=candidate.warp_count,
+                )
+                tiling_candidate = operator.get_tiling_strategy(
+                    hardware, dtype, pipeline_config=candidate_config, **dims
+                )
+                sub_ops_candidate = operator.get_ops_breakdown(
+                    dtype, hardware, candidate_config, **dims
+                )
+                if not sub_ops_candidate or not tiling_candidate:
+                    continue
+                schedule_candidate = schedule_pipeline(
+                    sub_ops_candidate, hardware, candidate_config, tiling_candidate, dtype=dtype, **dims
+                )
+                item = (
+                    schedule_candidate.total_time_s,
+                    candidate,
+                    candidate_config,
+                    tiling_candidate,
+                    sub_ops_candidate,
+                    schedule_candidate,
+                )
+                if best is None or item[0] < best[0]:
+                    best = item
 
-        # Get sub-op decomposition
-        sub_ops = operator.get_ops_breakdown(dtype, hardware, pipeline_config, **dims)
+            if best is None:
+                sub_ops = []
+                tiling = None
+                schedule = None
+            else:
+                _, selected_candidate, pipeline_config, tiling, sub_ops, schedule = best
+                pipeline_candidates = [selected_candidate] + rejected_candidates
+        else:
+            # Get tiling strategy
+            tiling = operator.get_tiling_strategy(
+                hardware, dtype, pipeline_config=pipeline_config, **dims
+            )
+
+            # Get sub-op decomposition
+            sub_ops = operator.get_ops_breakdown(dtype, hardware, pipeline_config, **dims)
+            schedule = None
 
         # Fallback to roofline if operator doesn't support pipeline
         if not sub_ops or not tiling:
@@ -156,10 +206,12 @@ class Analyzer:
                 stage_breakdown={"read": mem_read_time, "compute": compute_time, "write": mem_write_time},
             )
 
-        # Schedule pipeline
-        schedule = schedule_pipeline(
-            sub_ops, hardware, pipeline_config, tiling, dtype=dtype, **dims
-        )
+        # Schedule pipeline. Candidate-aware operators already computed the
+        # winning schedule while comparing alternatives.
+        if schedule is None:
+            schedule = schedule_pipeline(
+                sub_ops, hardware, pipeline_config, tiling, dtype=dtype, **dims
+            )
 
         # Derive ALL metrics from pipeline schedule for consistency
         total_flops = operator.compute_flops(**dims)
@@ -244,6 +296,7 @@ class Analyzer:
             pipeline_config=pipeline_config,
             tiling_info=tiling,
             pipeline_memory_breakdown=pipeline_memory_breakdown,
+            pipeline_candidates=pipeline_candidates,
         )
 
     # ------------------------------------------------------------------

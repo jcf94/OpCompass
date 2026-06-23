@@ -45,7 +45,9 @@ def test_matmul_a100_pipeline_async_on():
     assert memory["effective_hbm_read_bytes"] < memory["logical_hbm_read_bytes"]
     assert memory["effective_hbm_read_bytes"] < memory["logical_cta_read_bytes"]
     assert memory["effective_hbm_read_bytes"] == pytest.approx(result.total_read_bytes)
-    assert memory["l2_reuse_factor"] == pytest.approx(32.0)
+    assert memory["l2_reuse_factor"] > 1.0
+    assert result.pipeline_candidates
+    assert result.tiling_info.candidate_name == result.pipeline_candidates[0].name
     assert result.sol_tflops > 100
 
 
@@ -97,10 +99,35 @@ def test_matmul_a100_pipeline_sparsity():
     # SOL time may stay flat, but the compute stage itself must get shorter.
     assert result_sp.compute_time_s < result_no.compute_time_s
 
-    # With async overlap: per_iter = max(load_tp + shared_tp, mma_tp).
-    # Sparsity doubles MMA throughput, so per_iteration_cycles decreases only
-    # when MMA controls the steady-state advance.
-    assert result_sp.pipeline_schedule.total_cycles_per_block < result_no.pipeline_schedule.total_cycles_per_block
+    assert result_sp.sol_time_s < result_no.sol_time_s
+
+    forced_config_no = PipelineConfig(
+        async_copy_enabled=True,
+        sparsity_2_4_enabled=False,
+        block_m=128,
+        block_n=128,
+        block_k=32,
+        stage_count=2,
+        warp_count=4,
+    )
+    forced_config_sp = PipelineConfig(
+        async_copy_enabled=True,
+        sparsity_2_4_enabled=True,
+        block_m=128,
+        block_n=128,
+        block_k=32,
+        stage_count=2,
+        warp_count=4,
+    )
+    forced_no = analyzer.analyze(
+        op, hw, DataType.FP16, mode=AnalysisMode.PIPELINE,
+        pipeline_config=forced_config_no, M=4096, N=4096, K=4096,
+    )
+    forced_sp = analyzer.analyze(
+        op, hw, DataType.FP16, mode=AnalysisMode.PIPELINE,
+        pipeline_config=forced_config_sp, M=4096, N=4096, K=4096,
+    )
+    assert forced_sp.pipeline_schedule.total_cycles_per_block < forced_no.pipeline_schedule.total_cycles_per_block
 
 
 def test_pipeline_tiling_a100():
@@ -114,6 +141,8 @@ def test_pipeline_tiling_a100():
     assert tiling.block_n == 128
     assert tiling.block_k == 32
     assert tiling.num_warps_per_block == 4
+    assert tiling.stage_count == 2
+    assert tiling.registers_per_thread > 0
 
 
 def test_pipeline_tiling_custom_blocks():
@@ -137,6 +166,34 @@ def test_pipeline_tiling_custom_blocks():
     assert result.tiling_info.block_m == 64
     assert result.tiling_info.block_n == 128
     assert result.tiling_info.block_k == 16
+
+
+def test_pipeline_tiling_custom_stage_and_warp_count():
+    """Pipeline config should override stage count and warps per block."""
+    op = get_operator("matmul")()
+    hw = get_hardware("a100")()
+    config = PipelineConfig(
+        async_copy_enabled=True,
+        block_m=64,
+        block_n=128,
+        block_k=16,
+        stage_count=3,
+        warp_count=8,
+    )
+
+    result = Analyzer().analyze(
+        op, hw, DataType.FP16, mode=AnalysisMode.PIPELINE,
+        pipeline_config=config, M=4096, N=4096, K=4096,
+    )
+
+    assert result.tiling_info.stage_count == 3
+    assert result.tiling_info.num_warps_per_block == 8
+    assert result.pipeline_config.stage_count == 3
+    assert result.pipeline_config.warp_count == 8
+    assert result.tiling_info.shared_memory_per_block == (
+        3 * (64 * 16 + 16 * 128) * DataType.FP16.byte_size
+        + 64 * 128 * DataType.FP16.byte_size
+    )
 
 
 def test_pipeline_tiling_custom_blocks_validate_shared_memory():
@@ -172,6 +229,25 @@ def test_pipeline_tiling_custom_blocks_validate_instruction_granularity():
     analyzer = Analyzer()
     with pytest.raises(ValueError, match="multiple of 16"):
         analyzer.analyze(
+            op, hw, DataType.FP16, mode=AnalysisMode.PIPELINE,
+            pipeline_config=config, M=4096, N=4096, K=4096,
+        )
+
+
+def test_pipeline_tiling_custom_blocks_validate_register_pressure():
+    """Oversized warp overrides should be rejected by register/block limits."""
+    op = get_operator("matmul")()
+    hw = get_hardware("a100")()
+    config = PipelineConfig(
+        async_copy_enabled=True,
+        block_m=128,
+        block_n=128,
+        block_k=32,
+        warp_count=64,
+    )
+
+    with pytest.raises(ValueError, match="registers/block"):
+        Analyzer().analyze(
             op, hw, DataType.FP16, mode=AnalysisMode.PIPELINE,
             pipeline_config=config, M=4096, N=4096, K=4096,
         )

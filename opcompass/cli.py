@@ -84,6 +84,8 @@ def _build_pipeline_config(
     block_m: int | None,
     block_n: int | None,
     block_k: int | None,
+    stage_count: int | None,
+    warp_count: int | None,
 ) -> PipelineConfig:
     """Build PipelineConfig from CLI options."""
     return PipelineConfig(
@@ -92,6 +94,8 @@ def _build_pipeline_config(
         block_m=_resolve_optional_positive_int(block_m, "--block-m"),
         block_n=_resolve_optional_positive_int(block_n, "--block-n"),
         block_k=_resolve_optional_positive_int(block_k, "--block-k"),
+        stage_count=_resolve_optional_positive_int(stage_count, "--stage-count"),
+        warp_count=_resolve_optional_positive_int(warp_count, "--warp-count"),
     )
 
 
@@ -177,6 +181,8 @@ def info_cmd(operator_name: str):
 @click.option("--block-m", type=int, default=None, help="Override pipeline tile Block M")
 @click.option("--block-n", type=int, default=None, help="Override pipeline tile Block N")
 @click.option("--block-k", type=int, default=None, help="Override pipeline tile Block K")
+@click.option("--stage-count", type=int, default=None, help="Override pipeline stage count")
+@click.option("--warp-count", type=int, default=None, help="Override pipeline warps per block")
 @click.argument("operator_name")
 @click.pass_context
 def analyze_cmd(
@@ -190,6 +196,8 @@ def analyze_cmd(
     block_m: int | None,
     block_n: int | None,
     block_k: int | None,
+    stage_count: int | None,
+    warp_count: int | None,
     operator_name: str,
 ):
     """Analyze SOL performance for an operator.
@@ -229,7 +237,7 @@ def analyze_cmd(
     pipeline_config = None
     if resolved_mode == AnalysisMode.PIPELINE:
         pipeline_config = _build_pipeline_config(
-            async_copy, sparsity, block_m, block_n, block_k
+            async_copy, sparsity, block_m, block_n, block_k, stage_count, warp_count
         )
 
     op_inst = op_cls()
@@ -262,6 +270,8 @@ def analyze_cmd(
 @click.option("--block-m", type=int, default=None, help="Override pipeline tile Block M")
 @click.option("--block-n", type=int, default=None, help="Override pipeline tile Block N")
 @click.option("--block-k", type=int, default=None, help="Override pipeline tile Block K")
+@click.option("--stage-count", type=int, default=None, help="Override pipeline stage count")
+@click.option("--warp-count", type=int, default=None, help="Override pipeline warps per block")
 @click.argument("operator_name")
 @click.pass_context
 def sweep_cmd(
@@ -275,6 +285,8 @@ def sweep_cmd(
     block_m: int | None,
     block_n: int | None,
     block_k: int | None,
+    stage_count: int | None,
+    warp_count: int | None,
     operator_name: str,
 ):
     """Sweep over multiple dimensions / hardware targets.
@@ -303,7 +315,7 @@ def sweep_cmd(
     pipeline_config = None
     if resolved_mode == AnalysisMode.PIPELINE:
         pipeline_config = _build_pipeline_config(
-            async_copy, sparsity, block_m, block_n, block_k
+            async_copy, sparsity, block_m, block_n, block_k, stage_count, warp_count
         )
 
     # Parse dims and identify sweep axes
