@@ -174,9 +174,9 @@ class Analyzer:
             stage_breakdown[stage] = stage_breakdown.get(stage, 0) + sop.duration_cycles * clock_s * wave_count
 
         # Consolidate pipeline stages → read / compute / write
-        _read_stages = {"async_copy_load", "global_read", "shared_load"}
+        _read_stages = {"async_copy_load", "global_read", "shared_load", "tmem_load"}
         _compute_stages = {"mma", "fma_alu"}
-        _write_stages = {"shared_store", "global_write"}
+        _write_stages = {"shared_store", "global_write", "async_copy_store"}
 
         mem_read_time = sum(
             t for stage, t in stage_breakdown.items()

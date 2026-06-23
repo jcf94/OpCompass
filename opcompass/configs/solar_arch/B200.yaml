@@ -1,0 +1,15 @@
+# NVIDIA B200 (Blackwell, GB100) — 192 GB HBM3e SKU
+# Values derived from the NVIDIA Blackwell Architecture Technical Overview.
+# B200 uses a dual-die design (2 × 80 SM dies) connected via NV-HBI.
+name: "B200"
+SRAM_capacity: 67108864  # 64 MB L2 cache
+SRAM_byte_per_cycle: 6000  # ~10 TB/s L2 aggregate bandwidth at ~1.7 GHz
+DRAM_capacity: 206158430208  # 192 GB HBM3e
+DRAM_byte_per_cycle: 4662  # 8 TB/s at 1.716 GHz base/TC clock
+freq_GHz: 1.716
+MAC_per_cycle_fp32_sm: 26224  # 90 TFLOPS FP32 (CUDA cores) — MAC = 2 FLOPs
+MAC_per_cycle_fp16_tc: 655594  # 2250 TFLOPS FP16 (Tensor Cores) — MAC = 2 FLOPs
+MAC_per_cycle_bf16_tc: 655594  # 2250 TFLOPS BF16 (Tensor Cores) — MAC = 2 FLOPs
+MAC_per_cycle_tf32_tc: 327797  # 1125 TFLOPS TF32 (Tensor Cores) — MAC = 2 FLOPs
+MAC_per_cycle_fp8_tc: 1311188  # 4500 TFLOPS FP8 (Tensor Cores) — MAC = 2 FLOPs
+MAC_per_cycle_int8_tc: 1311188  # 4500 TOPS INT8 (Tensor Cores) — MAC = 2 OPs

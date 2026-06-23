@@ -122,6 +122,19 @@ def get_inputs():
                 bM, bN, bK = 128, 128, 32
         elif arch == "hopper":
             bM, bN, bK = 128, 128, 64
+        elif arch == "blackwell":
+            # Blackwell has 228 KB shared memory + 256 KB TMEM per SM.
+            # TMEM handles accumulator storage, reducing shared memory
+            # pressure.  Use same base tile as Hopper; block_K can be
+            # larger when TMEM-accelerated instructions are used.
+            if dtype in (DataType.FP16, DataType.BF16, DataType.FP8):
+                bM, bN, bK = 256, 128, 64
+            elif dtype == DataType.TF32:
+                bM, bN, bK = 128, 128, 64
+            elif dtype == DataType.FP32:
+                bM, bN, bK = 128, 128, 32
+            else:
+                bM, bN, bK = 256, 128, 64
         else:
             bM, bN, bK = 64, 64, 32
 
@@ -226,21 +239,81 @@ def get_inputs():
         ]
 
         # Epilogue sub-ops (one-shot)
-        sub_ops += [
-            SubOp(
-                name="shared_store_C",
-                pipeline_stage="shared_store",
-                write_bytes=bM * bN * bs,
-                depends_on=["mma"],
-                is_recurring=False,
-            ),
-            SubOp(
-                name="global_write_C",
-                pipeline_stage="global_write",
-                write_bytes=bM * bN * bs,
-                depends_on=["shared_store_C"],
-                is_recurring=False,
-            ),
-        ]
+        # Architecture-specific epilogue paths:
+        #
+        # Blackwell (TMA + TMEM):
+        #   TMEM → RF (tmem_load) → SMEM (shared_store) → HBM (async_copy_store)
+        #   Async MMA writes accumulators to TMEM, freeing register file.
+        #   Dedicated Store-TMA engine at 256 B/clk/SM.
+        #
+        # Hopper (TMA, no TMEM):
+        #   RF → SMEM (shared_store) → HBM (async_copy_store)
+        #   Accumulator in registers (wgmma).  Unified TMA engine shared
+        #   between load and store at 128 B/clk/SM — 2× global_write.
+        #
+        # Ampere / older (async copy, no TMA):
+        #   RF → SMEM (shared_store) → HBM (global_write)
+        #   No TMA — epilogue uses traditional L2 write path at 64 B/clk/SM.
+        arch = getattr(hardware, "architecture", "").lower()
+        if async_on and arch == "blackwell":
+            # TMEM accumulator readout + TMA store
+            sub_ops += [
+                SubOp(
+                    name="tmem_load_C",
+                    pipeline_stage="tmem_load",
+                    read_bytes=bM * bN * bs,
+                    depends_on=["mma"],
+                    is_recurring=False,
+                ),
+                SubOp(
+                    name="shared_store_C",
+                    pipeline_stage="shared_store",
+                    write_bytes=bM * bN * bs,
+                    depends_on=["tmem_load_C"],
+                    is_recurring=False,
+                ),
+                SubOp(
+                    name="async_copy_store_C",
+                    pipeline_stage="async_copy_store",
+                    write_bytes=bM * bN * bs,
+                    depends_on=["shared_store_C"],
+                    is_recurring=False,
+                ),
+            ]
+        elif async_on and arch == "hopper":
+            # TMA store (no TMEM — accumulator in registers after wgmma)
+            sub_ops += [
+                SubOp(
+                    name="shared_store_C",
+                    pipeline_stage="shared_store",
+                    write_bytes=bM * bN * bs,
+                    depends_on=["mma"],
+                    is_recurring=False,
+                ),
+                SubOp(
+                    name="async_copy_store_C",
+                    pipeline_stage="async_copy_store",
+                    write_bytes=bM * bN * bs,
+                    depends_on=["shared_store_C"],
+                    is_recurring=False,
+                ),
+            ]
+        else:
+            sub_ops += [
+                SubOp(
+                    name="shared_store_C",
+                    pipeline_stage="shared_store",
+                    write_bytes=bM * bN * bs,
+                    depends_on=["mma"],
+                    is_recurring=False,
+                ),
+                SubOp(
+                    name="global_write_C",
+                    pipeline_stage="global_write",
+                    write_bytes=bM * bN * bs,
+                    depends_on=["shared_store_C"],
+                    is_recurring=False,
+                ),
+            ]
 
         return sub_ops

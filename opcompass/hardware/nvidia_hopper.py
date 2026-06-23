@@ -160,13 +160,19 @@ class NvidiaHopper(Hardware):
         """Return the common Hopper SM pipeline stages.
 
         Pipeline order: global_read → async_copy_load (TMA) → shared_load →
-        mma → fma_alu → shared_store → global_write.
+        mma → fma_alu → shared_store → async_copy_store (TMA) → global_write.
 
         New in Hopper: the Tensor Memory Accelerator (TMA) handles async
         memory copies with hardware address generation, replacing the
         simpler Ampere async copy engine.  TMA supports 1D-5D tensor copies,
         frees CUDA threads from address calculations, and can transfer up
         to the full shared memory capacity in a single operation.
+
+        Hopper has a single unified TMA engine shared between loads and
+        stores.  The epilogue store can use TMA (async_copy_store at
+        128 B/clk/SM) which is 2× faster than the traditional global_write
+        path (64 B/clk/SM).  On Blackwell this is further improved with
+        dedicated Load/Store TMA engines at 256 B/clk/SM each.
 
         ``throughput_per_cycle`` values are per-SM.  The pipeline model
         scales them by SM count automatically.
@@ -235,6 +241,20 @@ class NvidiaHopper(Hardware):
                 latency_cycles=18,
                 throughput_per_cycle=256,       # bytes/cycle per SM (wider than A100's 128)
                 description="Registers → shared memory (per-warp store, 32 banks × 4 B)",
+            ),
+
+            # ── Memory: shared memory → HBM via TMA store ─────────
+            PipelineStage(
+                name="async_copy_store",
+                latency_cycles=280,
+                throughput_per_cycle=128,       # bytes/cycle per SM (unified TMA engine)
+                description=(
+                    "Shared memory → HBM via TMA store (cp.async.bulk).  "
+                    "Hopper has a single unified TMA engine shared between "
+                    "load and store — 128 B/clk/SM.  During the epilogue "
+                    "there is no load contention, so the full TMA bandwidth "
+                    "is available.  2× the traditional global_write path."
+                ),
             ),
 
             # ── Memory: registers → HBM (via L2) ───────────────────
