@@ -542,6 +542,91 @@ const PipelineUI = {
         ).join("");
     },
 
+    // ── Performance Guidance ───────────────────────────────────────
+    renderRecommendations(result) {
+        let container = document.getElementById("pipeline-recommendations-content");
+        if (!container) {
+            const pipelineResults = document.getElementById("pipeline-results");
+            if (!pipelineResults) return;
+            const card = document.createElement("div");
+            card.className = "card";
+            card.id = "pipeline-recommendations-card";
+            card.innerHTML = `
+                <h2>Performance Guidance</h2>
+                <div id="pipeline-recommendations-content"></div>
+            `;
+            const ganttCard = document.getElementById("gantt-chart-container")?.closest(".card");
+            pipelineResults.insertBefore(card, ganttCard || null);
+            container = document.getElementById("pipeline-recommendations-content");
+        }
+        if (!container || !result.pipeline_schedule || !result.tiling_info) return;
+
+        const schedule = result.pipeline_schedule;
+        const tiling = result.tiling_info;
+        const bottleneck = result.bottleneck || schedule.bottleneck_stage || "";
+        const tips = [];
+
+        if (bottleneck.includes("async_copy") || bottleneck.includes("global_read")) {
+            tips.push({
+                title: "Memory load is limiting throughput",
+                text: `Try increasing Block K from ${tiling.block_k} to improve arithmetic work per global-memory load. If shared memory becomes too high, reduce Block M or Block N first.`,
+            });
+            tips.push({
+                title: "Keep async copy enabled",
+                text: "Async copy overlaps global-memory movement with compute; disabling it will usually make a memory-bound schedule slower.",
+            });
+        } else if (bottleneck.includes("shared_load")) {
+            tips.push({
+                title: "Shared-memory feed is the bottleneck",
+                text: `Try smaller Block K or a more balanced M/N tile. Current tile is ${tiling.block_m}x${tiling.block_n}x${tiling.block_k}.`,
+            });
+        } else if (bottleneck.includes("mma") || bottleneck.includes("fma_alu")) {
+            tips.push({
+                title: "Compute is limiting throughput",
+                text: "Larger Block M/N can improve reuse and occupancy tradeoffs, but if wave count rises or shared memory pressure grows, step back to the previous tile.",
+            });
+            if (result.pipeline_config && !result.pipeline_config.sparsity_2_4_enabled) {
+                tips.push({
+                    title: "Check sparse eligibility",
+                    text: "If weights are compatible with 2:4 sparsity, enabling it can reduce MMA cycles in the pipeline model.",
+                });
+            }
+        } else if (bottleneck.includes("store") || bottleneck.includes("write")) {
+            tips.push({
+                title: "Epilogue/writeback is visible",
+                text: "Try increasing Block K so more compute is done per output tile write, or reduce Block M/N if the output tile is too large.",
+            });
+        }
+
+        if (schedule.wave_count > 1) {
+            tips.push({
+                title: "There are multiple CTA waves",
+                text: `Wave count is ${schedule.wave_count}. Smaller Block M/N can increase grid parallelism balance, while larger tiles may reduce wave count but increase per-block time.`,
+            });
+        }
+
+        if (tiling.shared_memory_per_block > 0) {
+            tips.push({
+                title: "Shared memory budget",
+                text: `Current tile uses ${(tiling.shared_memory_per_block / 1024).toFixed(1)} KB per block. Leave headroom for occupancy when increasing Block K.`,
+            });
+        }
+
+        if (tips.length === 0) {
+            tips.push({
+                title: "No single dominant adjustment",
+                text: "Try one tile dimension at a time and compare SOL time, bottleneck stage, wave count, and shared memory per block.",
+            });
+        }
+
+        container.innerHTML = tips.map(t => `
+            <div class="recommendation-item">
+                <div class="recommendation-title">${t.title}</div>
+                <div class="recommendation-text">${t.text}</div>
+            </div>
+        `).join("");
+    },
+
     // ── Stage Breakdown Table ──────────────────────────────────────
     renderStageBreakdown(stageBreakdown, schedule) {
         const tbody = document.querySelector("#pipeline-stage-table tbody");
@@ -633,6 +718,7 @@ const PipelineUI = {
         this.showPipelineResults();
         this.renderPipelineStats(result.pipeline_schedule, result.pipeline_config);
         this.renderTilingInfo(result.tiling_info);
+        this.renderRecommendations(result);
         this.renderGanttChart(result.pipeline_schedule);
         this.renderStageBreakdown(result.stage_breakdown, result.pipeline_schedule);
     },

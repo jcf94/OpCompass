@@ -98,7 +98,53 @@ def get_inputs():
     # Pipeline-level decomposition
     # ------------------------------------------------------------------
 
-    def get_tiling_strategy(self, hardware, dtype=None, **dims):
+    def get_tile_constraints(self, hardware=None, dtype=None) -> dict:
+        """Return CTA tile granularity derived from the compute instruction.
+
+        The pipeline model maps the CTA tile onto hardware instructions:
+        Tensor Core MMA has architecture/dtype-specific K granularity, while
+        CUDA-core FMA is scalar and only requires positive integers.
+        """
+        if dtype is None:
+            dtype = DataType.FP16
+
+        arch = getattr(hardware, "architecture", "").lower() if hardware is not None else ""
+
+        # CUDA-core FMA path.
+        if dtype in (DataType.FP32, DataType.FP64):
+            granularity = (1, 1, 1)
+            instruction = "cuda_fma"
+        # Tensor Core paths. M/N follow the common m16n8 instruction tile.
+        elif dtype in (DataType.FP16, DataType.BF16):
+            granularity = (16, 8, 16)
+            instruction = "mma_m16n8k16"
+        elif dtype == DataType.TF32:
+            granularity = (16, 8, 8)
+            instruction = "mma_m16n8k8"
+        elif dtype in (DataType.INT8, DataType.FP8):
+            granularity = (16, 8, 32)
+            instruction = "mma_m16n8k32"
+        elif dtype == DataType.INT4:
+            granularity = (16, 8, 64)
+            instruction = "mma_m16n8k64"
+        else:
+            granularity = (16, 8, 16)
+            instruction = "mma_m16n8k16"
+
+        # Older Volta WMMA FP16 is commonly exposed as m16n16k16.
+        if arch == "volta" and dtype == DataType.FP16:
+            granularity = (16, 16, 16)
+            instruction = "wmma_m16n16k16"
+
+        m, n, k = granularity
+        return {
+            "block_m": {"multiple_of": m, "min": m},
+            "block_n": {"multiple_of": n, "min": n},
+            "block_k": {"multiple_of": k, "min": k},
+            "instruction": instruction,
+        }
+
+    def get_tiling_strategy(self, hardware, dtype=None, pipeline_config=None, **dims):
         """Return a CUTLASS-style tiling strategy for the given hardware.
 
         Uses architecture-aware default tile sizes, then validates
@@ -138,13 +184,27 @@ def get_inputs():
         else:
             bM, bN, bK = 64, 64, 32
 
+        constraints = self.get_tile_constraints(hardware, dtype)
+        if pipeline_config is not None:
+            bM = self._apply_tile_override("block_m", bM, pipeline_config.block_m, constraints)
+            bN = self._apply_tile_override("block_n", bN, pipeline_config.block_n, constraints)
+            bK = self._apply_tile_override("block_k", bK, pipeline_config.block_k, constraints)
+
         bs = dtype.byte_size
         # Double-buffered shared memory: 2 × (A_tile + B_tile) + C_stage
         smem = 2 * (bM * bK + bK * bN) * bs + bM * bN * bs
 
         # Check against hardware shared memory limit
         smem_limit = cu.shared_memory_max_kb * 1024
-        if smem > smem_limit:
+        if pipeline_config is not None and (
+            pipeline_config.block_m or pipeline_config.block_n or pipeline_config.block_k
+        ):
+            if smem > smem_limit:
+                raise ValueError(
+                    f"Requested tile {bM}x{bN}x{bK} uses {smem / 1024:.1f} KB shared memory, "
+                    f"exceeding {hardware.name} limit of {cu.shared_memory_max_kb} KB per {cu.name}."
+                )
+        elif smem > smem_limit:
             while bK > 8 and smem > smem_limit:
                 bK //= 2
                 smem = 2 * (bM * bK + bK * bN) * bs + bM * bN * bs
@@ -158,6 +218,28 @@ def get_inputs():
             shared_memory_per_block=smem,
             num_warps_per_block=num_warps,
         )
+
+    @staticmethod
+    def _apply_tile_override(name: str, default: int, value, constraints: dict) -> int:
+        if value in (None, ""):
+            return default
+        try:
+            tile = int(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"{name} must be a positive integer")
+        if tile <= 0:
+            raise ValueError(f"{name} must be a positive integer")
+        rule = constraints.get(name, {})
+        multiple = int(rule.get("multiple_of", 1))
+        minimum = int(rule.get("min", multiple))
+        if tile < minimum:
+            raise ValueError(f"{name} must be at least {minimum}")
+        if multiple > 1 and tile % multiple != 0:
+            raise ValueError(
+                f"{name}={tile} is invalid for {constraints.get('instruction', 'this instruction')}; "
+                f"it must be a multiple of {multiple}"
+            )
+        return tile
 
     def get_ops_breakdown(self, dtype=None, hardware=None, pipeline_config=None, **dims):
         """Decompose matmul into CUTLASS-style sub-ops per K-slice iteration.
@@ -182,7 +264,9 @@ def get_inputs():
         K = dims.get("K", 0)
         bs = dtype.byte_size
 
-        tiling = self.get_tiling_strategy(hardware, dtype, **dims)
+        tiling = self.get_tiling_strategy(
+            hardware, dtype, pipeline_config=pipeline_config, **dims
+        )
         if tiling is None:
             return []
 

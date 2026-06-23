@@ -183,16 +183,23 @@ def schedule_pipeline(
             if x and x > 0
         ),
     )
+    blocks_per_sm = max(1, math.ceil(grid_size / cu.count)) if cu.count > 0 else grid_size
     wave_count = max(1, math.ceil(grid_size / (cu.count * resident_blocks_per_sm)))
 
     clock_s = 1.0 / (cu.clock_mhz * 1e6) if cu.clock_mhz > 0 else 0.0
-    total_time_s = total_cycles * clock_s * wave_count
 
     # Identify bottleneck stage
     stage_times: dict[str, int] = {}
     for s in scheduled:
         stage_times[s.pipeline_stage] = stage_times.get(s.pipeline_stage, 0) + s.duration_cycles
     bottleneck = max(stage_times, key=stage_times.get) if stage_times else ""
+
+    # ``total_cycles`` is the critical-path time for one CTA using a full SM
+    # pipeline. Resident CTAs improve latency hiding, but they do not multiply
+    # the SM's MMA, async-copy, or load/store throughput. Estimate chip time by
+    # charging each SM for the CTA stage work it must actually issue.
+    resource_cycles = max(stage_times.values(), default=0) * blocks_per_sm
+    total_time_s = max(total_cycles, resource_cycles) * clock_s
 
     # Compute per-iteration, prologue, and epilogue cycles
     # Use full durations (with latency) for prologue/epilogue since these

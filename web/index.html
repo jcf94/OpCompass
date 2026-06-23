@@ -66,6 +66,16 @@
                         <input type="checkbox" id="sparsity-toggle">
                         <span class="toggle-switch"></span>
                     </label>
+                    <div class="tile-input-grid">
+                        <label for="block-m-input">Block M</label>
+                        <input type="number" id="block-m-input" min="1" step="1" placeholder="auto">
+                        <label for="block-n-input">Block N</label>
+                        <input type="number" id="block-n-input" min="1" step="1" placeholder="auto">
+                        <label for="block-k-input">Block K</label>
+                        <input type="number" id="block-k-input" min="1" step="1" placeholder="auto">
+                    </div>
+                    <div id="tile-constraint-hint" class="tile-constraint-hint"></div>
+                    <button type="button" id="tile-reset-btn" class="btn-mini tile-reset">Use Auto Tiles</button>
                 </div>
 
                 <div id="dim-inputs"><!-- dynamic --></div>
@@ -152,6 +162,16 @@
                     <div class="card">
                         <h2>Tiling Strategy</h2>
                         <div id="tiling-info-content"></div>
+                    </div>
+                </div>
+
+                <div class="card" id="pipeline-recommendations-card">
+                    <h2>Performance Guidance</h2>
+                    <div id="pipeline-recommendations-content">
+                        <div class="recommendation-item">
+                            <div class="recommendation-title">Run a pipeline analysis</div>
+                            <div class="recommendation-text">Guidance appears here after the pipeline schedule is generated.</div>
+                        </div>
                     </div>
                 </div>
 
@@ -259,11 +279,11 @@
     OpCompass v0.1.0 — Theoretical upper-bound estimates
 </footer>
 
-<script src="/static/js/api.js"></script>
-<script src="/static/js/charts.js"></script>
-<script src="/static/js/pipeline.js"></script>
-<script src="/static/js/hardware.js"></script>
-<script src="/static/js/overview.js"></script>
-<script src="/static/js/app.js"></script>
+<script src="/static/js/api.js?v=20260623-tile-constraints"></script>
+<script src="/static/js/charts.js?v=20260623-tile-constraints"></script>
+<script src="/static/js/pipeline.js?v=20260623-tile-constraints"></script>
+<script src="/static/js/hardware.js?v=20260623-tile-constraints"></script>
+<script src="/static/js/overview.js?v=20260623-tile-constraints"></script>
+<script src="/static/js/app.js?v=20260623-tile-constraints"></script>
 </body>
 </html>

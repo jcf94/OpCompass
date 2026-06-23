@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -123,7 +124,9 @@ class Analyzer:
             pipeline_config = PipelineConfig()
 
         # Get tiling strategy
-        tiling = operator.get_tiling_strategy(hardware, dtype, **dims)
+        tiling = operator.get_tiling_strategy(
+            hardware, dtype, pipeline_config=pipeline_config, **dims
+        )
 
         # Get sub-op decomposition
         sub_ops = operator.get_ops_breakdown(dtype, hardware, pipeline_config, **dims)
@@ -162,18 +165,20 @@ class Analyzer:
         total_flops = operator.compute_flops(**dims)
         read_bytes, write_bytes = operator.compute_io_bytes(dtype, **dims)
         clock_s = 1.0 / (hardware.compute_unit.clock_mhz * 1e6)
-        wave_count = schedule.wave_count
+        blocks_per_sm = (
+            max(1, math.ceil(schedule.grid_size / hardware.compute_unit.count))
+            if hardware.compute_unit.count > 0 else schedule.grid_size
+        )
 
         # Per-stage busy time. These are "stage occupied" times — the sum of
-        # each sub-op's duration within one block. They are NOT additive to
-        # SOL because pipeline stages overlap (e.g. mma runs concurrently
-        # with async_copy_load of the next iteration). We scale by wave_count
-        # so the breakdown is on the same scale as SOL_time (which already
-        # includes wave_count via schedule.total_time_s).
+        # each sub-op's duration for the CTA work each SM must issue. They are
+        # NOT additive to SOL because pipeline stages overlap (e.g. mma runs
+        # concurrently with async_copy_load of the next iteration). Resident
+        # CTAs hide latency but still share the same SM pipeline throughput.
         stage_breakdown = {}
         for sop in schedule.sub_ops:
             stage = sop.pipeline_stage
-            stage_breakdown[stage] = stage_breakdown.get(stage, 0) + sop.duration_cycles * clock_s * wave_count
+            stage_breakdown[stage] = stage_breakdown.get(stage, 0) + sop.duration_cycles * clock_s * blocks_per_sm
 
         # Consolidate pipeline stages → read / compute / write
         _read_stages = {"async_copy_load", "global_read", "shared_load", "tmem_load"}
@@ -193,15 +198,18 @@ class Analyzer:
             if stage in _write_stages
         )
 
-        sol_time = schedule.total_time_s
-        sol_tflops = (total_flops / sol_time / 1e12) if sol_time > 0 else float("inf")
-
         # Roofline data from pipeline model rather than simple model
         peak_flops = hardware.get_peak_flops(dtype)
+        if pipeline_config.sparsity_2_4_enabled and dtype.value in {"fp16", "bf16", "tf32", "fp8", "int8"}:
+            peak_flops *= 2
         peak_bw = hardware.hbm_bandwidth
         total_io = read_bytes + write_bytes
         oi = (total_flops / total_io) if total_io > 0 else float("inf")
         achievable = min(peak_flops, oi * peak_bw)
+        # The pipeline scheduler is the source of truth in pipeline mode.
+        # Roofline values are still returned for chart context, not as a cap.
+        sol_time = schedule.total_time_s
+        sol_tflops = (total_flops / sol_time / 1e12) if sol_time > 0 else float("inf")
 
         return AnalysisResult(
             operator=operator.name,

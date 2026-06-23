@@ -100,7 +100,7 @@ class Operator(ABC):
         return []
 
     def get_tiling_strategy(
-        self, hardware: "Hardware", dtype=None, **dims: int
+        self, hardware: "Hardware", dtype=None, pipeline_config=None, **dims: int
     ) -> TilingInfo | None:
         """Suggest a tiling / blocking strategy for the given hardware.
 
@@ -109,6 +109,20 @@ class Operator(ABC):
         Args:
             hardware: Target hardware (provides SM resources for constraint checks).
             dtype: Data type for the computation.
+            pipeline_config: Pipeline feature toggles and optional tile overrides.
             **dims: Problem dimensions.
         """
         return None
+
+    def get_tile_constraints(self, hardware=None, dtype=None) -> dict:
+        """Return tile alignment constraints for user-selected pipeline blocks.
+
+        Operators can override this to expose instruction-level tile
+        granularity, e.g. Tensor Core MMA shapes. The returned dictionary
+        should contain ``block_m``, ``block_n``, and ``block_k`` entries.
+        """
+        return {
+            "block_m": {"multiple_of": 1, "min": 1},
+            "block_n": {"multiple_of": 1, "min": 1},
+            "block_k": {"multiple_of": 1, "min": 1},
+        }

@@ -95,6 +95,9 @@ def _result_to_dict(result: AnalysisResult) -> dict:
         d["pipeline_config"] = {
             "async_copy_enabled": pc.async_copy_enabled,
             "sparsity_2_4_enabled": pc.sparsity_2_4_enabled,
+            "block_m": pc.block_m,
+            "block_n": pc.block_n,
+            "block_k": pc.block_k,
         }
 
     # Solar-specific fields
@@ -144,9 +147,9 @@ def _format_table(result: AnalysisResult) -> str:
     write = f"{result.total_write_bytes / 1e9:.2f} GB"
     sol_us = result.sol_time_s * 1e6
 
-    # In pipeline mode, the Read/Compute/Write figures are stage busy-times
-    # (Σ sub-op durations × waves). They are NOT additive to SOL — pipeline
-    # stages overlap (e.g. mma[k] runs concurrently with async_copy_load[k+1]).
+    # In pipeline mode, the Read/Compute/Write figures are non-additive:
+    # pipeline stages overlap, and resident CTAs share the same SM pipeline
+    # throughput rather than multiplying it.
     # For non-pipeline modes the figures follow max() or sum() semantics
     # depending on hardware.can_overlap_with_compute.
     is_pipeline = result.pipeline_schedule is not None
@@ -173,7 +176,7 @@ def _format_table(result: AnalysisResult) -> str:
         f"  ★ Bottleneck : {result.bottleneck}",
     ]
     if is_pipeline:
-        lines.append("  Note: Read/Compute/Write above are stage busy-times (non-additive: stages overlap)")
+        lines.append("  Note: Read/Compute/Write above are non-additive because pipeline stages overlap")
     lines.append("═" * 65)
 
     # Add pipeline-specific info

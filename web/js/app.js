@@ -6,6 +6,7 @@
 let operators = [];
 let hardware = [];
 let currentResult = null;
+let tileConstraints = null;
 
 // ── DOM refs ──────────────────────────────────────────────────
 const $opSelect = document.getElementById("operator-select");
@@ -18,6 +19,11 @@ const $hwSpec = document.getElementById("hw-spec-content");
 const $pipelineConfig = document.getElementById("pipeline-config");
 const $asyncCopyToggle = document.getElementById("async-copy-toggle");
 const $sparsityToggle = document.getElementById("sparsity-toggle");
+const $blockMInput = document.getElementById("block-m-input");
+const $blockNInput = document.getElementById("block-n-input");
+const $blockKInput = document.getElementById("block-k-input");
+const $tileResetBtn = document.getElementById("tile-reset-btn");
+const $tileConstraintHint = document.getElementById("tile-constraint-hint");
 
 const $solTime = document.getElementById("sol-time");
 const $solTflops = document.getElementById("sol-tflops");
@@ -56,6 +62,7 @@ async function init() {
 
     updateDimInputs();
     updateHardwareInfo();
+    await updateTileConstraints();
 }
 
 // ── Dynamic dimension inputs ──────────────────────────────────
@@ -140,12 +147,132 @@ function togglePipelineConfig() {
     }
 }
 
+async function updateTileConstraints() {
+    if (!$opSelect.value || !$hwSelect.value || !$dtypeSelect.value) return;
+    try {
+        tileConstraints = await API.getTileConstraints(
+            $opSelect.value, $hwSelect.value, $dtypeSelect.value
+        );
+        applyTileInputConstraints();
+    } catch (err) {
+        console.warn("Failed to load tile constraints:", err);
+        tileConstraints = null;
+    }
+}
+
+function applyTileInputConstraints() {
+    const bindings = [
+        [$blockMInput, "block_m"],
+        [$blockNInput, "block_n"],
+        [$blockKInput, "block_k"],
+    ];
+    bindings.forEach(([input, key]) => {
+        if (!input || !tileConstraints || !tileConstraints[key]) return;
+        const rule = tileConstraints[key];
+        input.min = rule.min || rule.multiple_of || 1;
+        input.step = rule.multiple_of || 1;
+        input.placeholder = `auto · ×${rule.multiple_of || 1}`;
+        input.title = `${key.replace("_", " ").toUpperCase()} must be a multiple of ${rule.multiple_of || 1}`;
+    });
+    if ($tileConstraintHint && tileConstraints) {
+        $tileConstraintHint.textContent =
+            `${tileConstraints.instruction || "instruction"} · ` +
+            `M ×${tileConstraints.block_m?.multiple_of || 1}, ` +
+            `N ×${tileConstraints.block_n?.multiple_of || 1}, ` +
+            `K ×${tileConstraints.block_k?.multiple_of || 1}`;
+    }
+}
+
+function getTileRule(key) {
+    return tileConstraints && tileConstraints[key] ? tileConstraints[key] : null;
+}
+
+function isValidTileValue(key, value) {
+    if (value == null) return true;
+    const rule = getTileRule(key);
+    if (!rule) return value > 0;
+    const multiple = rule.multiple_of || 1;
+    const min = rule.min || multiple;
+    return value >= min && value % multiple === 0;
+}
+
+function tileValidationMessage(key) {
+    const rule = getTileRule(key);
+    if (!rule) return "Use a positive integer";
+    const multiple = rule.multiple_of || 1;
+    const min = rule.min || multiple;
+    return `${key.replace("_", " ").toUpperCase()} must be a multiple of ${multiple} and at least ${min}` +
+        (tileConstraints.instruction ? ` (${tileConstraints.instruction})` : "");
+}
+
+function parseTileInput(input) {
+    if (!input || input.value.trim() === "") return null;
+    const value = Number(input.value);
+    if (!Number.isInteger(value) || value <= 0) return NaN;
+    return value;
+}
+
+function normalizeTileInput(input, key) {
+    const value = parseTileInput(input);
+    if (value == null || Number.isNaN(value)) {
+        input.setCustomValidity(value == null ? "" : tileValidationMessage(key));
+        return value == null;
+    }
+    const rule = getTileRule(key);
+    if (!rule) {
+        input.setCustomValidity("");
+        return true;
+    }
+    const multiple = rule.multiple_of || 1;
+    const min = rule.min || multiple;
+    const normalized = Math.max(min, Math.ceil(value / multiple) * multiple);
+    input.value = String(normalized);
+    input.setCustomValidity("");
+    return true;
+}
+
+function updateTileInputValidity(input, key) {
+    const value = parseTileInput(input);
+    if (value == null) {
+        input.setCustomValidity("");
+        return true;
+    }
+    if (Number.isNaN(value) || !isValidTileValue(key, value)) {
+        input.setCustomValidity(tileValidationMessage(key));
+        return false;
+    }
+    input.setCustomValidity("");
+    return true;
+}
+
 function collectPipelineConfig() {
     if ($modeSelect.value !== "pipeline") return null;
-    return {
+    const config = {
         async_copy_enabled: $asyncCopyToggle.checked,
         sparsity_2_4_enabled: $sparsityToggle.checked,
     };
+
+    const parseTile = (input) => {
+        if (!input || input.value.trim() === "") return null;
+        const v = Number(input.value);
+        return Number.isInteger(v) && v > 0 ? v : NaN;
+    };
+    const validateTile = (key, value) => {
+        if (value == null) return;
+        if (Number.isNaN(value) || !isValidTileValue(key, value)) {
+            throw new Error(tileValidationMessage(key));
+        }
+    };
+    const blockM = parseTile($blockMInput);
+    const blockN = parseTile($blockNInput);
+    const blockK = parseTile($blockKInput);
+    validateTile("block_m", blockM);
+    validateTile("block_n", blockN);
+    validateTile("block_k", blockK);
+    if (blockM != null) config.block_m = blockM;
+    if (blockN != null) config.block_n = blockN;
+    if (blockK != null) config.block_k = blockK;
+    return config;
 }
 
 // ── Analyze ────────────────────────────────────────────────────
@@ -166,7 +293,16 @@ async function runAnalysis() {
     const dtype = $dtypeSelect.value;
     const mode = $modeSelect.value;
     const dims = collectDims();
-    const pipelineConfig = collectPipelineConfig();
+    if (mode === "pipeline") {
+        await updateTileConstraints();
+    }
+    let pipelineConfig;
+    try {
+        pipelineConfig = collectPipelineConfig();
+    } catch (err) {
+        alert(err.message);
+        return;
+    }
 
     _analysisInFlight = true;
     $analyzeBtn.textContent = "Analyzing…";
@@ -435,13 +571,18 @@ $tabBtns.forEach(btn => {
 // Select changes → update UI + immediate re-analysis
 $opSelect.addEventListener("change", () => {
     updateDimInputs();
+    updateTileConstraints();
     triggerAnalysis(true);
 });
 $hwSelect.addEventListener("change", () => {
     updateHardwareInfo();
+    updateTileConstraints();
     triggerAnalysis(true);
 });
-$dtypeSelect.addEventListener("change", () => triggerAnalysis(true));
+$dtypeSelect.addEventListener("change", () => {
+    updateTileConstraints();
+    triggerAnalysis(true);
+});
 $modeSelect.addEventListener("change", () => {
     togglePipelineConfig();
     triggerAnalysis(true);
@@ -450,6 +591,28 @@ $modeSelect.addEventListener("change", () => {
 // Pipeline toggles → immediate re-analysis (only relevant in pipeline mode)
 $asyncCopyToggle.addEventListener("change", () => triggerAnalysis(true));
 $sparsityToggle.addEventListener("change", () => triggerAnalysis(true));
+[
+    [$blockMInput, "block_m"],
+    [$blockNInput, "block_n"],
+    [$blockKInput, "block_k"],
+].forEach(([input, key]) => {
+    input.addEventListener("input", () => {
+        if (updateTileInputValidity(input, key)) {
+            triggerAnalysis(false);
+        }
+    });
+    input.addEventListener("change", () => {
+        if (normalizeTileInput(input, key)) {
+            triggerAnalysis(true);
+        }
+    });
+});
+$tileResetBtn.addEventListener("click", () => {
+    $blockMInput.value = "";
+    $blockNInput.value = "";
+    $blockKInput.value = "";
+    triggerAnalysis(true);
+});
 
 // Manual rerun button
 $analyzeBtn.addEventListener("click", () => {

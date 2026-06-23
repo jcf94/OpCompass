@@ -118,6 +118,9 @@ class PipelineConfig:
 
     async_copy_enabled: bool = True       # Use async_copy_load vs global_read path
     sparsity_2_4_enabled: bool = False    # 2:4 structured sparsity doubles MMA throughput
+    block_m: int | None = None            # Optional user-selected CTA tile M
+    block_n: int | None = None            # Optional user-selected CTA tile N
+    block_k: int | None = None            # Optional user-selected CTA tile K
 
 
 @dataclass

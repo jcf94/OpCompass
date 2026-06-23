@@ -69,6 +69,32 @@ def _parse_dim_args(ctx: click.Context) -> dict[str, int]:
     return dims
 
 
+def _resolve_optional_positive_int(value: int | None, name: str) -> int | None:
+    """Validate optional positive integer CLI options."""
+    if value is None:
+        return None
+    if value <= 0:
+        raise click.BadParameter(f"{name} must be a positive integer")
+    return value
+
+
+def _build_pipeline_config(
+    async_copy: bool,
+    sparsity: bool,
+    block_m: int | None,
+    block_n: int | None,
+    block_k: int | None,
+) -> PipelineConfig:
+    """Build PipelineConfig from CLI options."""
+    return PipelineConfig(
+        async_copy_enabled=async_copy,
+        sparsity_2_4_enabled=sparsity,
+        block_m=_resolve_optional_positive_int(block_m, "--block-m"),
+        block_n=_resolve_optional_positive_int(block_n, "--block-n"),
+        block_k=_resolve_optional_positive_int(block_k, "--block-k"),
+    )
+
+
 # ---------------------------------------------------------------------------
 # CLI group
 # ---------------------------------------------------------------------------
@@ -148,6 +174,9 @@ def info_cmd(operator_name: str):
 @click.option("--format", "-f", "fmt", default="table", help="Output format: table, json, csv")
 @click.option("--async-copy/--no-async-copy", default=True, help="Enable/disable async copy (pipeline mode)")
 @click.option("--sparsity/--no-sparsity", default=False, help="Enable/disable 2:4 sparsity (pipeline mode)")
+@click.option("--block-m", type=int, default=None, help="Override pipeline tile Block M")
+@click.option("--block-n", type=int, default=None, help="Override pipeline tile Block N")
+@click.option("--block-k", type=int, default=None, help="Override pipeline tile Block K")
 @click.argument("operator_name")
 @click.pass_context
 def analyze_cmd(
@@ -158,6 +187,9 @@ def analyze_cmd(
     fmt: str,
     async_copy: bool,
     sparsity: bool,
+    block_m: int | None,
+    block_n: int | None,
+    block_k: int | None,
     operator_name: str,
 ):
     """Analyze SOL performance for an operator.
@@ -196,19 +228,22 @@ def analyze_cmd(
     # Build pipeline config if in pipeline mode
     pipeline_config = None
     if resolved_mode == AnalysisMode.PIPELINE:
-        pipeline_config = PipelineConfig(
-            async_copy_enabled=async_copy,
-            sparsity_2_4_enabled=sparsity,
+        pipeline_config = _build_pipeline_config(
+            async_copy, sparsity, block_m, block_n, block_k
         )
 
     op_inst = op_cls()
     hw_inst = hw_cls()
 
     analyzer = Analyzer()
-    result = analyzer.analyze(
-        op_inst, hw_inst, resolved_dtype, mode=resolved_mode,
-        pipeline_config=pipeline_config, **dims
-    )
+    try:
+        result = analyzer.analyze(
+            op_inst, hw_inst, resolved_dtype, mode=resolved_mode,
+            pipeline_config=pipeline_config, **dims
+        )
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
 
     click.echo(format_result(result, fmt=fmt))
 
@@ -222,6 +257,11 @@ def analyze_cmd(
 @click.option("--dtype", "-d", default="fp16", help="Data type")
 @click.option("--mode", "-m", default="hierarchy_roofline", help="Analysis mode: hierarchy_roofline, pipeline, solar")
 @click.option("--format", "-f", "fmt", default="table", help="Output format: table, json, csv")
+@click.option("--async-copy/--no-async-copy", default=True, help="Enable/disable async copy (pipeline mode)")
+@click.option("--sparsity/--no-sparsity", default=False, help="Enable/disable 2:4 sparsity (pipeline mode)")
+@click.option("--block-m", type=int, default=None, help="Override pipeline tile Block M")
+@click.option("--block-n", type=int, default=None, help="Override pipeline tile Block N")
+@click.option("--block-k", type=int, default=None, help="Override pipeline tile Block K")
 @click.argument("operator_name")
 @click.pass_context
 def sweep_cmd(
@@ -230,6 +270,11 @@ def sweep_cmd(
     dtype: str,
     mode: str,
     fmt: str,
+    async_copy: bool,
+    sparsity: bool,
+    block_m: int | None,
+    block_n: int | None,
+    block_k: int | None,
     operator_name: str,
 ):
     """Sweep over multiple dimensions / hardware targets.
@@ -255,6 +300,11 @@ def sweep_cmd(
 
     resolved_dtype = _resolve_dtype(dtype)
     resolved_mode = _resolve_mode(mode)
+    pipeline_config = None
+    if resolved_mode == AnalysisMode.PIPELINE:
+        pipeline_config = _build_pipeline_config(
+            async_copy, sparsity, block_m, block_n, block_k
+        )
 
     # Parse dims and identify sweep axes
     raw_dims = _parse_dim_args(ctx)
@@ -272,9 +322,14 @@ def sweep_cmd(
         op_inst = op_cls()
         analyzer = Analyzer()
         for hw_inst in hw_instances:
-            result = analyzer.analyze(
-                op_inst, hw_inst, resolved_dtype, mode=resolved_mode, **fixed_dims
-            )
+            try:
+                result = analyzer.analyze(
+                    op_inst, hw_inst, resolved_dtype, mode=resolved_mode,
+                    pipeline_config=pipeline_config, **fixed_dims
+                )
+            except ValueError as e:
+                click.echo(f"Error: {e}", err=True)
+                sys.exit(1)
             click.echo(format_result(result, fmt=fmt))
             click.echo()
         return
@@ -293,9 +348,14 @@ def sweep_cmd(
         combo_dims = dict(zip(axis_names, combo))
         all_dims = {**fixed_dims, **combo_dims}
         for hw_inst in hw_instances:
-            result = analyzer.analyze(
-                op_inst, hw_inst, resolved_dtype, mode=resolved_mode, **all_dims
-            )
+            try:
+                result = analyzer.analyze(
+                    op_inst, hw_inst, resolved_dtype, mode=resolved_mode,
+                    pipeline_config=pipeline_config, **all_dims
+                )
+            except ValueError as e:
+                click.echo(f"Error: {e}", err=True)
+                sys.exit(1)
             results.append(result)
 
     # Output

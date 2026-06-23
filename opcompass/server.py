@@ -247,6 +247,27 @@ def api_get_hardware(name: str) -> Dict[str, Any]:
     }
 
 
+@app.get("/api/tile-constraints")
+def api_tile_constraints(operator: str, hardware: str, dtype: str = "fp16") -> Dict[str, Any]:
+    """Return pipeline tile granularity for an operator/hardware/dtype."""
+    try:
+        op_cls = get_operator(operator)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Operator '{operator}' not found")
+
+    try:
+        hw_cls = get_hardware(hardware)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Hardware '{hardware}' not found")
+
+    try:
+        resolved_dtype = DataType(dtype.lower())
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Unknown dtype '{dtype}'")
+
+    return op_cls().get_tile_constraints(hw_cls(), resolved_dtype)
+
+
 @app.post("/api/analyze")
 def api_analyze(body: Dict[str, Any]) -> Dict[str, Any]:
     """Run a SOL analysis.
@@ -299,13 +320,19 @@ def api_analyze(body: Dict[str, Any]) -> Dict[str, Any]:
         pipeline_config = PipelineConfig(
             async_copy_enabled=pipeline_config_dict.get("async_copy_enabled", True),
             sparsity_2_4_enabled=pipeline_config_dict.get("sparsity_2_4_enabled", False),
+            block_m=pipeline_config_dict.get("block_m"),
+            block_n=pipeline_config_dict.get("block_n"),
+            block_k=pipeline_config_dict.get("block_k"),
         )
 
     op = op_cls()
     hw = hw_cls()
 
     analyzer = Analyzer()
-    result = analyzer.analyze(op, hw, dtype, mode=mode, pipeline_config=pipeline_config, **dims)
+    try:
+        result = analyzer.analyze(op, hw, dtype, mode=mode, pipeline_config=pipeline_config, **dims)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
     return _result_to_dict(result)
 
