@@ -241,6 +241,36 @@ def get_inputs():
             )
         return tile
 
+    @staticmethod
+    def _l2_capacity_bytes(hardware) -> int:
+        for tier in getattr(hardware.memory, "tiers", []):
+            if tier.name.lower() == "l2":
+                return int(tier.capacity_bytes)
+        return 0
+
+    def _matmul_l2_reuse_bytes(self, hardware, dtype, tiling, M: int, N: int) -> tuple[float, float]:
+        """Return average per-CTA HBM bytes for A/B loads in one K-slice."""
+        bs = dtype.byte_size
+        bM = tiling.block_m
+        bN = tiling.block_n
+        bK = tiling.block_k
+        grid_m = max(1, math.ceil(M / bM))
+        grid_n = max(1, math.ceil(N / bN))
+        grid_size = grid_m * grid_n
+
+        logical_a = grid_size * bM * bK * bs
+        logical_b = grid_size * bK * bN * bs
+        unique_a = M * bK * bs
+        unique_b = N * bK * bs
+
+        l2_capacity = self._l2_capacity_bytes(hardware)
+        working_set = unique_a + unique_b
+        fit_ratio = min(1.0, l2_capacity / working_set) if working_set > 0 and l2_capacity > 0 else 0.0
+
+        effective_a = unique_a * fit_ratio + logical_a * (1.0 - fit_ratio)
+        effective_b = unique_b * fit_ratio + logical_b * (1.0 - fit_ratio)
+        return effective_a / grid_size, effective_b / grid_size
+
     def get_ops_breakdown(self, dtype=None, hardware=None, pipeline_config=None, **dims):
         """Decompose matmul into CUTLASS-style sub-ops per K-slice iteration.
 
@@ -284,6 +314,9 @@ def get_inputs():
         load_b_name = "async_copy_load_B" if async_on else "global_read_B"
 
         compute_stage = "fma_alu" if dtype in (DataType.FP32, DataType.FP64) else "mma"
+        effective_hbm_a, effective_hbm_b = self._matmul_l2_reuse_bytes(
+            hardware, dtype, tiling, M, N
+        )
 
         # Per-iteration recurring sub-ops
         sub_ops = [
@@ -291,6 +324,7 @@ def get_inputs():
                 name=load_a_name,
                 pipeline_stage=load_stage,
                 read_bytes=bM * bK * bs,
+                effective_hbm_read_bytes=effective_hbm_a,
                 depends_on=[],
                 is_recurring=True,
             ),
@@ -298,6 +332,7 @@ def get_inputs():
                 name=load_b_name,
                 pipeline_stage=load_stage,
                 read_bytes=bK * bN * bs,
+                effective_hbm_read_bytes=effective_hbm_b,
                 depends_on=[],
                 is_recurring=True,
             ),
@@ -362,6 +397,7 @@ def get_inputs():
                     name="async_copy_store_C",
                     pipeline_stage="async_copy_store",
                     write_bytes=bM * bN * bs,
+                    effective_hbm_write_bytes=bM * bN * bs,
                     depends_on=["shared_store_C"],
                     is_recurring=False,
                 ),
@@ -380,6 +416,7 @@ def get_inputs():
                     name="async_copy_store_C",
                     pipeline_stage="async_copy_store",
                     write_bytes=bM * bN * bs,
+                    effective_hbm_write_bytes=bM * bN * bs,
                     depends_on=["shared_store_C"],
                     is_recurring=False,
                 ),
@@ -397,6 +434,7 @@ def get_inputs():
                     name="global_write_C",
                     pipeline_stage="global_write",
                     write_bytes=bM * bN * bs,
+                    effective_hbm_write_bytes=bM * bN * bs,
                     depends_on=["shared_store_C"],
                     is_recurring=False,
                 ),

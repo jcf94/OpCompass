@@ -41,6 +41,13 @@ def test_matmul_a100_pipeline_async_on():
     # Async overlap: per-iter should be less than prologue
     assert ps.per_iteration_cycles < ps.prologue_cycles
 
+    memory = result.pipeline_memory_breakdown
+    assert memory["effective_hbm_read_bytes"] < memory["logical_hbm_read_bytes"]
+    assert memory["effective_hbm_read_bytes"] < memory["logical_cta_read_bytes"]
+    assert memory["effective_hbm_read_bytes"] == pytest.approx(result.total_read_bytes)
+    assert memory["l2_reuse_factor"] == pytest.approx(32.0)
+    assert result.sol_tflops > 100
+
 
 def test_matmul_a100_pipeline_async_off():
     """Pipeline mode without async copy — all sequential per iteration."""
@@ -197,6 +204,26 @@ def test_pipeline_compute_time_accounts_for_sm_resource_sharing():
 
     assert result.compute_time_s == pytest.approx(expected_compute_time)
     assert result.stage_breakdown["compute"] == pytest.approx(expected_compute_time)
+
+
+def test_matmul_pipeline_l2_overflow_degrades_toward_logical_hbm_traffic():
+    """When the K-slice panel working set exceeds L2, effective HBM rises."""
+    op = get_operator("matmul")()
+    hw = get_hardware("a100")()
+    config = PipelineConfig(async_copy_enabled=True)
+
+    result = Analyzer().analyze(
+        op, hw, DataType.FP16, mode=AnalysisMode.PIPELINE,
+        pipeline_config=config, M=2**24, N=2**24, K=32,
+    )
+
+    memory = result.pipeline_memory_breakdown
+    logical = memory["logical_hbm_read_bytes"]
+    effective = memory["effective_hbm_read_bytes"]
+    unique = memory["unique_tensor_read_bytes"]
+
+    assert unique < effective < logical
+    assert effective / logical > 0.95
 
 
 def test_pipeline_subops_decomposition():

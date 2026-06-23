@@ -356,9 +356,17 @@ function renderResults(data) {
     $bottleneckCard.className = "metric-card " + bottleneck;
 
     // Detail table
+    const pipelineMemory = data.pipeline_memory_breakdown || null;
+    const readRows = pipelineMemory ? `
+        <tr><td>Unique Tensor Read</td><td>${formatBytes(data.total_read_bytes)}</td></tr>
+        <tr><td>Effective HBM Read</td><td>${formatBytes(pipelineMemory.effective_hbm_read_bytes)}</td></tr>
+        <tr><td>CTA Logical Read</td><td>${formatBytes(pipelineMemory.logical_cta_read_bytes)}</td></tr>
+    ` : `
+        <tr><td>Read Bytes</td><td>${formatBytes(data.total_read_bytes)}</td></tr>
+    `;
     $detailTable.innerHTML = `
         <tr><td>Total FLOPs</td><td>${formatFlops(data.total_flops)}</td></tr>
-        <tr><td>Read Bytes</td><td>${formatBytes(data.total_read_bytes)}</td></tr>
+        ${readRows}
         <tr><td>Write Bytes</td><td>${formatBytes(data.total_write_bytes)}</td></tr>
         <tr><td>Memory Read Time</td><td>${data.memory_read_time_us.toFixed(1)} µs</td></tr>
         <tr><td>Compute Time</td><td>${data.compute_time_us.toFixed(1)} µs</td></tr>

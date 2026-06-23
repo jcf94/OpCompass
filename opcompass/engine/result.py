@@ -51,6 +51,8 @@ def _result_to_dict(result: AnalysisResult) -> dict:
         "stage_breakdown": result.stage_breakdown,
         "roofline_data": result.roofline_data,
     }
+    if result.pipeline_memory_breakdown:
+        d["pipeline_memory_breakdown"] = result.pipeline_memory_breakdown
 
     # Pipeline-specific fields
     if result.pipeline_schedule is not None:
@@ -204,6 +206,18 @@ def _format_table(result: AnalysisResult) -> str:
             f"  Wave count         : {ps.wave_count}  (ceil(grid / resident CTAs))",
             f"  K iterations       : {ps.num_k_iterations}  (ceil(K / block_K))",
             f"  Bottleneck stage   : {ps.bottleneck_stage}",
+        ]
+        memory = result.pipeline_memory_breakdown
+        if memory:
+            lines += [
+                "",
+                "  Pipeline Memory:",
+                f"    Effective HBM read     : {memory.get('effective_hbm_read_bytes', 0) / 1e9:.3f} GB",
+                f"    CTA logical read       : {memory.get('logical_cta_read_bytes', 0) / 1e9:.3f} GB",
+                f"    Unique tensor read     : {memory.get('unique_tensor_read_bytes', 0) / 1e9:.3f} GB",
+                f"    L2 reuse factor        : {memory.get('l2_reuse_factor', 1):.2f}x",
+            ]
+        lines += [
             "",
             f"  Stage Cycle Breakdown:",
         ]

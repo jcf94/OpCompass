@@ -210,6 +210,9 @@ class Analyzer:
         # Roofline values are still returned for chart context, not as a cap.
         sol_time = schedule.total_time_s
         sol_tflops = (total_flops / sol_time / 1e12) if sol_time > 0 else float("inf")
+        pipeline_memory_breakdown = self._build_pipeline_memory_breakdown(
+            sub_ops, schedule, read_bytes, write_bytes
+        )
 
         return AnalysisResult(
             operator=operator.name,
@@ -240,6 +243,7 @@ class Analyzer:
             pipeline_schedule=schedule,
             pipeline_config=pipeline_config,
             tiling_info=tiling,
+            pipeline_memory_breakdown=pipeline_memory_breakdown,
         )
 
     # ------------------------------------------------------------------
@@ -271,6 +275,65 @@ class Analyzer:
 
         utilization = 1.0
         return flops / (peak * utilization)
+
+    def _build_pipeline_memory_breakdown(
+        self,
+        sub_ops,
+        schedule,
+        unique_tensor_read_bytes: int,
+        unique_tensor_write_bytes: int,
+    ) -> dict[str, float]:
+        """Separate CTA-local movement from HBM traffic after cache reuse."""
+        grid_size = schedule.grid_size
+        recurring_multiplier = schedule.num_k_iterations
+
+        logical_cta_read = 0.0
+        logical_cta_write = 0.0
+        logical_hbm_read = 0.0
+        logical_hbm_write = 0.0
+        effective_hbm_read = 0.0
+        effective_hbm_write = 0.0
+
+        for sub in sub_ops:
+            multiplier = recurring_multiplier if sub.is_recurring else 1
+            scale = multiplier * grid_size
+            logical_cta_read += sub.read_bytes * scale
+            logical_cta_write += sub.write_bytes * scale
+
+            stage = sub.pipeline_stage.lower()
+            if "global" in stage or "async_copy" in stage:
+                logical_hbm_read += sub.read_bytes * scale
+                logical_hbm_write += sub.write_bytes * scale
+                effective_read = (
+                    sub.effective_hbm_read_bytes
+                    if sub.effective_hbm_read_bytes is not None
+                    else sub.read_bytes
+                )
+                effective_write = (
+                    sub.effective_hbm_write_bytes
+                    if sub.effective_hbm_write_bytes is not None
+                    else sub.write_bytes
+                )
+                effective_hbm_read += effective_read * scale
+                effective_hbm_write += effective_write * scale
+
+        l2_reuse_factor = (
+            logical_hbm_read / effective_hbm_read
+            if effective_hbm_read > 0
+            else 1.0
+        )
+
+        return {
+            "logical_cta_read_bytes": logical_cta_read,
+            "logical_cta_write_bytes": logical_cta_write,
+            "logical_hbm_read_bytes": logical_hbm_read,
+            "logical_hbm_write_bytes": logical_hbm_write,
+            "effective_hbm_read_bytes": effective_hbm_read,
+            "effective_hbm_write_bytes": effective_hbm_write,
+            "unique_tensor_read_bytes": float(unique_tensor_read_bytes),
+            "unique_tensor_write_bytes": float(unique_tensor_write_bytes),
+            "l2_reuse_factor": l2_reuse_factor,
+        }
 
     def _build_stage_breakdown(
         self, read_bytes, write_bytes, flops, hardware, dtype
