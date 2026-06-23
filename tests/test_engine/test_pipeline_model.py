@@ -83,13 +83,12 @@ def test_matmul_a100_pipeline_sparsity():
         pipeline_config=config_sparsity, M=4096, N=4096, K=4096,
     )
 
-    # Sparsity should reduce total time (shorter prologue/epilogue MMA)
+    # Sparsity should reduce total time (shorter mma throughput in steady state)
     assert result_sp.sol_time_s < result_no.sol_time_s
 
-    # Note: per_iteration_cycles may not decrease when load is the bottleneck.
-    # With async overlap: per_iter = max(load_dur, mma_dur) + shared_load_dur.
-    # If load_dur > mma_dur, doubling MMA throughput doesn't change max(),
-    # so per_iteration_cycles stays the same. Verify total block cycles instead.
+    # With async overlap: per_iter = max(load_tp + shared_tp, mma_tp).
+    # Sparsity doubles mma throughput, so per_iteration_cycles decreases
+    # when mma was the bottleneck (which it is for this fp16 matmul).
     assert result_sp.pipeline_schedule.total_cycles_per_block < result_no.pipeline_schedule.total_cycles_per_block
 
 
