@@ -99,7 +99,7 @@ class NvidiaMaxwell(Hardware):
     max_threads_per_unit = 2048
     max_thread_blocks_per_unit = 32
     max_registers_per_thread = 255
-    max_registers_per_block = 65536
+    max_registers_per_block = 32768  # CC 5.2 limit (half the register file)
 
     # ── Parallel / concurrent execution capabilities ─────────────────
     can_concurrent_fp32_int32 = False  # Shared datapath

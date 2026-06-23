@@ -260,7 +260,9 @@ class NvidiaRTX6000(NvidiaTuring):
                 bandwidth_bytes_per_sec=3.0e12,       # Approximate
             ),
         ],
-        can_overlap_with_compute={"GDDR6"},
+        # Turing has no async copy engine (introduced in Ampere);
+        # overlapped FP32+INT32 execution is per-SM, not GDDR DMA overlap.
+        can_overlap_with_compute=set(),
     )
 
     # ── Compute unit ──────────────────────────────────────────────────
