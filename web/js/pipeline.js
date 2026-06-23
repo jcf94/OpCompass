@@ -512,11 +512,6 @@ const PipelineUI = {
             ["Bottleneck", schedule.bottleneck_stage],
         ];
 
-        if (pipelineConfig) {
-            rows.push(["Async Copy", pipelineConfig.async_copy_enabled ? "ON" : "OFF"]);
-            rows.push(["2:4 Sparsity", pipelineConfig.sparsity_2_4_enabled ? "ON" : "OFF"]);
-        }
-
         container.innerHTML = rows.map(([label, value]) =>
             `<div class="spec-row"><span class="spec-label">${label}</span><span class="spec-value mono">${value}</span></div>`
         ).join("");
@@ -527,10 +522,15 @@ const PipelineUI = {
         const container = document.getElementById("tiling-info-content");
         if (!container || !tilingInfo) return;
 
+        // Sync tile input fields with actual values from analysis
+        const blockM = document.getElementById("block-m-input");
+        const blockN = document.getElementById("block-n-input");
+        const blockK = document.getElementById("block-k-input");
+        if (blockM) { blockM.value = tilingInfo.block_m; blockM.placeholder = tilingInfo.block_m; }
+        if (blockN) { blockN.value = tilingInfo.block_n; blockN.placeholder = tilingInfo.block_n; }
+        if (blockK) { blockK.value = tilingInfo.block_k; blockK.placeholder = tilingInfo.block_k; }
+
         const rows = [
-            ["Block M", tilingInfo.block_m],
-            ["Block N", tilingInfo.block_n],
-            ["Block K", tilingInfo.block_k],
             ["Warps/Block", tilingInfo.num_warps_per_block],
             ["Shared Mem", tilingInfo.shared_memory_per_block != null
                 ? (tilingInfo.shared_memory_per_block / 1024).toFixed(1) + " KB"

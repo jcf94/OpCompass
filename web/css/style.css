@@ -1307,7 +1307,32 @@ footer {
 #tiling-info-content {
   display: flex;
   flex-direction: column;
-  gap: var(--space-xs);
+}
+
+#pipeline-stats-content .spec-row,
+#tiling-info-content .spec-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 0.3rem 0;
+  border-bottom: 1px solid var(--border-light);
+}
+#pipeline-stats-content .spec-row:last-child,
+#tiling-info-content .spec-row:last-child {
+  border-bottom: none;
+}
+
+#pipeline-stats-content .spec-label,
+#tiling-info-content .spec-label {
+  color: var(--text-muted);
+}
+
+#pipeline-stats-content .spec-value,
+#tiling-info-content .spec-value {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
 }
 
 #pipeline-recommendations-content {

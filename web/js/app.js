@@ -371,10 +371,19 @@ function renderResults(data) {
     renderBreakdownChart(data);
 
     const rooflineCard = document.getElementById("roofline-card");
+    const detailTableCard = document.getElementById("detail-table-container");
+    const cardRow = document.querySelector("#results-panel > .card-row");
+
     if (data.mode === "pipeline") {
         rooflineCard?.classList.add("hidden");
+        if (detailTableCard && cardRow && detailTableCard.parentElement !== cardRow) {
+            cardRow.appendChild(detailTableCard);
+        }
     } else {
         rooflineCard?.classList.remove("hidden");
+        if (detailTableCard && cardRow && detailTableCard.parentElement === cardRow) {
+            cardRow.parentNode.insertBefore(detailTableCard, cardRow.nextSibling);
+        }
         const totalIo = data.total_read_bytes + data.total_write_bytes;
         const oi = totalIo > 0 ? data.total_flops / totalIo : 1000;
         const rooflineData = data.roofline_data || {};
@@ -619,6 +628,8 @@ $tileResetBtn.addEventListener("click", () => {
     $blockMInput.value = "";
     $blockNInput.value = "";
     $blockKInput.value = "";
+    // Reset placeholder to auto hint; renderTilingInfo will update after analysis
+    applyTileInputConstraints();
     triggerAnalysis(true);
 });
 
