@@ -1,0 +1,3 @@
+[submodule "3rdparty/SOLAR"]
+	path = 3rdparty/SOLAR
+	url = https://github.com/NVlabs/SOLAR.git
