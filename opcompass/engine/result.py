@@ -96,6 +96,44 @@ def _result_to_dict(result: AnalysisResult) -> dict:
             "sparsity_2_4_enabled": pc.sparsity_2_4_enabled,
         }
 
+    # Solar-specific fields
+    if result.solar_data is not None:
+        sd = result.solar_data
+        d["solar_data"] = {
+            "num_layers": sd.num_layers,
+            "total_macs": sd.total_macs,
+            "arch_name": sd.arch_name,
+            "arch_freq_ghz": sd.arch_freq_ghz,
+            "unfused": {
+                "runtime_ms": sd.unfused_runtime_ms,
+                "bottleneck": sd.unfused_bottleneck,
+                "arithmetic_intensity": sd.unfused_arithmetic_intensity,
+                "memory_bytes": sd.unfused_memory_bytes,
+                "compute_cycles": sd.unfused_compute_cycles,
+            },
+            "fused": {
+                "runtime_ms": sd.fused_runtime_ms,
+                "bottleneck": sd.fused_bottleneck,
+                "arithmetic_intensity": sd.fused_arithmetic_intensity,
+                "memory_bytes": sd.fused_memory_bytes,
+            },
+            "fused_prefetched": {
+                "runtime_ms": sd.fused_prefetched_runtime_ms,
+                "bottleneck": sd.fused_prefetched_bottleneck,
+                "arithmetic_intensity": sd.fused_prefetched_arithmetic_intensity,
+                "memory_bytes": sd.fused_prefetched_memory_bytes,
+            },
+            "memory_breakdown": {
+                "weight_bytes": sd.weight_bytes,
+                "model_io_bytes": sd.model_io_bytes,
+                "intermediate_bytes": sd.intermediate_bytes,
+            },
+            "speedup": {
+                "fused_vs_unfused": sd.fused_speedup,
+                "fused_prefetched_vs_unfused": sd.fused_prefetched_speedup,
+            },
+        }
+
     return d
 
 
@@ -157,6 +195,31 @@ def _format_table(result: AnalysisResult) -> str:
                 f"  2:4 Sparsity      : {'ON' if pc.sparsity_2_4_enabled else 'OFF'}",
             ]
         lines += ["═" * 65]
+
+    # Add solar-specific info
+    if result.solar_data is not None:
+        sd = result.solar_data
+        lines += [
+            "",
+            "═" * 65,
+            f"  SOLAR Analysis  (arch: {sd.arch_name} @ {sd.arch_freq_ghz} GHz)",
+            "─" * 65,
+            f"  Workload: {sd.num_layers} layers, {sd.total_macs:,} MACs, {sd.total_flops:,} FLOPs",
+            "─" * 65,
+            f"  {'Model':<24} {'Runtime':>8} {'Bottleneck':>14} {'AI (FLOP/B)':>13}",
+            f"  {'─'*24} {'─'*8} {'─'*14} {'─'*13}",
+            f"  {'Unfused':<24} {sd.unfused_runtime_ms:>7.3f} ms {sd.unfused_bottleneck:>14} {sd.unfused_arithmetic_intensity:>13.1f}",
+            f"  {'Fused':<24} {sd.fused_runtime_ms:>7.3f} ms {sd.fused_bottleneck:>14} {sd.fused_arithmetic_intensity:>13.1f}",
+            f"  {'Fused+Prefetched ★':<24} {sd.fused_prefetched_runtime_ms:>7.3f} ms {sd.fused_prefetched_bottleneck:>14} {sd.fused_prefetched_arithmetic_intensity:>13.1f}",
+            "─" * 65,
+            "  Memory Breakdown:",
+            f"    Weights      : {sd.weight_bytes / 1e9:.3f} GB",
+            f"    Model I/O    : {sd.model_io_bytes / 1e9:.3f} GB",
+            f"    Intermediate : {sd.intermediate_bytes / 1e9:.3f} GB",
+            "─" * 65,
+            f"  Speedup: Fused={sd.fused_speedup:.2f}×  Fused+Prefetched={sd.fused_prefetched_speedup:.2f}×",
+            "═" * 65,
+        ]
 
     return "\n".join(lines)
 

@@ -41,6 +41,10 @@ class Analyzer:
         if mode is None:
             mode = AnalysisMode.HIERARCHY_ROOFLINE
 
+        # ── Solar mode: use SOLAR pytorch graph pipeline ──────────────
+        if mode == AnalysisMode.SOLAR:
+            return self._analyze_solar(operator, hardware, dtype, dims)
+
         # ── Pipeline mode: use the new DAG-based scheduler ────────────
         if mode == AnalysisMode.PIPELINE:
             return self._analyze_pipeline(operator, hardware, dtype, pipeline_config, dims)
@@ -250,3 +254,16 @@ class Analyzer:
             "peak_bandwidth": peak_bw,
             "achievable_flops": achievable_flops,
         }
+
+    # ------------------------------------------------------------------
+    # Solar mode
+    # ------------------------------------------------------------------
+
+    def _analyze_solar(
+        self, operator, hardware, dtype, dims: dict
+    ) -> AnalysisResult:
+        """Run SOLAR pytorch graph analysis."""
+        from opcompass.engine.solar_analyzer import SolarAnalyzer
+
+        solar = SolarAnalyzer()
+        return solar.analyze(operator, hardware, dtype, **dims)

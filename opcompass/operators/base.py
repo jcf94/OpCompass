@@ -54,6 +54,34 @@ class Operator(ABC):
         ...
 
     # ------------------------------------------------------------------
+    # Solar mode support — generate a SOLAR-compatible model file
+    # ------------------------------------------------------------------
+
+    def get_solar_model_source(self, dtype, **dims: int) -> str:
+        """Generate Python source for a SOLAR-compatible model file.
+
+        The returned string must be a complete Python module containing:
+
+        - A ``Model(torch.nn.Module)`` class whose ``forward()`` implements
+          the operator computation.
+        - A ``get_inputs()`` function that returns the input tensors (as a
+          list or tuple) with the correct shapes and dtypes.
+
+        Override this in subclasses to enable solar analysis mode.
+
+        Args:
+            dtype: Data type for the computation.
+            **dims: Problem dimensions (e.g., M, N, K for matmul).
+
+        Returns:
+            Python source code as a string.
+        """
+        raise NotImplementedError(
+            f"{self.name}: get_solar_model_source not implemented. "
+            f"Solar mode requires this method to generate a SOLAR-compatible model."
+        )
+
+    # ------------------------------------------------------------------
     # Optional hooks — override these for finer-grained analysis
     # ------------------------------------------------------------------
 

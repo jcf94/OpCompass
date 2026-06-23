@@ -39,9 +39,9 @@ pytest tests/test_operators/test_matmul.py -v
    - Synthesis: if `can_overlap_with_compute` is set, `max(compute, read, write)`; otherwise sum.
 
 Three analysis modes (`AnalysisMode` enum):
-- `simple` — roofline using HBM bandwidth only
-- `hierarchy` — uses the multi-tier memory model (first/slowest tier for the primary estimate)
+- `hierarchy_roofline` — roofline using multi-tier memory model (first/slowest tier for the primary estimate)
 - `pipeline` — stage-level scheduling via `_match_stage` heuristics (see `engine/pipeline_model.py`). Requires operators to provide `SubOp` breakdowns via `get_ops_breakdown()`.
+- `solar` — uses the vendored `3rdparty/SOLAR` toolkit to extract a PyTorch computation graph (via torchview), convert it to einsum notation, and run hardware-independent analysis + roofline perf prediction. Requires `torch`, `torchview`, `pyyaml`. Each operator must implement `get_solar_model_source(dtype, **dims) → str` to generate a SOLAR-compatible model file. See `engine/solar_analyzer.py`.
 
 ### Data model relationships (`opcompass/models.py`)
 
@@ -60,5 +60,9 @@ The backend (`server.py`) is FastAPI. Static files are served from `web/` at `/s
 
 ### Class inheritance for extensions
 
-- New operator: subclass `Operator` (in `operators/base.py`). Override `compute_flops`, `compute_io_bytes`. Optionally override `get_ops_breakdown` for pipeline mode, `get_tiling_strategy` for tiling suggestions.
-- New hardware: subclass `Hardware` (in `hardware/base.py`). Set `memory: MemoryHierarchy` and `compute_unit: ComputeUnit`. For detailed pipeline modeling, populate `ComputeUnit.pipeline` with all memory/compute stages and fill in the optional SM resource fields (`register_file_kb`, `shared_memory_max_kb`, `tensor_cores_per_unit`, `can_concurrent_fp32_int32`, etc.).
+- New operator: subclass `Operator` (in `operators/base.py`). Override `compute_flops`, `compute_io_bytes`. Optionally override `get_ops_breakdown` for pipeline mode, `get_tiling_strategy` for tiling suggestions, `get_solar_model_source` for solar mode (generates a SOLAR-compatible PyTorch model file).
+- New hardware: subclass `Hardware` (in `hardware/base.py`). Set `memory: MemoryHierarchy` and `compute_unit: ComputeUnit`. For detailed pipeline modeling, populate `ComputeUnit.pipeline` with all memory/compute stages and fill in the optional SM resource fields (`register_file_kb`, `shared_memory_max_kb`, `tensor_cores_per_unit`, `can_concurrent_fp32_int32`, etc.). For solar mode support, add a corresponding arch config YAML in `opcompass/configs/solar_arch/`.
+
+### SOLAR arch configs
+
+`opcompass/configs/solar_arch/` holds GPU architecture definitions in SOLAR's YAML format (DRAM/SRAM capacity and bandwidth per cycle, frequency, MAC throughput per dtype). The mapping from OpCompass hardware names to config files is in `engine/solar_analyzer.py` (`HARDWARE_TO_SOLAR_ARCH`).

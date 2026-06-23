@@ -7,6 +7,20 @@ from opcompass.models import DataType, SubOp, TilingInfo
 from opcompass.operators.base import Operator
 
 
+def _dtype_to_torch_str(dtype: DataType) -> str:
+    """Map OpCompass DataType to a torch dtype string for code generation."""
+    _map = {
+        DataType.FP64: "torch.float64",
+        DataType.FP32: "torch.float32",
+        DataType.TF32: "torch.float32",  # TF32 uses FP32 storage
+        DataType.FP16: "torch.float16",
+        DataType.BF16: "torch.bfloat16",
+        DataType.INT8: "torch.int8",
+        DataType.FP8: "torch.float8_e4m3fn",
+    }
+    return _map.get(dtype, "torch.float16")
+
+
 class Matmul(Operator):
     """Standard dense matrix multiplication.
 
@@ -34,6 +48,40 @@ class Matmul(Operator):
 
         A, B = inputs
         return [torch.matmul(A, B)]
+
+    # ------------------------------------------------------------------
+    # Solar mode support
+    # ------------------------------------------------------------------
+
+    def get_solar_model_source(self, dtype, **dims) -> str:
+        """Generate a SOLAR-compatible model file for matmul C = A @ B.
+
+        Shapes: A(M,K) × B(K,N) → C(M,N)
+        """
+        M = dims.get("M", 0)
+        N = dims.get("N", 0)
+        K = dims.get("K", 0)
+        torch_dtype = _dtype_to_torch_str(dtype)
+
+        return f'''import torch
+from torch import nn
+
+class Model(nn.Module):
+    """Matmul: C[M,N] = A[M,K] × B[K,N]."""
+
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, A, B):
+        return torch.matmul(A, B)
+
+
+def get_inputs():
+    M, N, K = {M}, {N}, {K}
+    A = torch.randn(M, K, dtype={torch_dtype})
+    B = torch.randn(K, N, dtype={torch_dtype})
+    return [A, B]
+'''
 
     def compute_flops(self, M: int = 0, N: int = 0, K: int = 0, **kwargs) -> int:
         return 2 * M * N * K

@@ -40,6 +40,7 @@ class AnalysisMode(str, Enum):
 
     HIERARCHY_ROOFLINE = "hierarchy_roofline"  # Roofline with multi-tier memory hierarchy
     PIPELINE = "pipeline"                     # Pipeline stage-level modeling
+    SOLAR = "solar"                           # SOLAR torch graph analysis (via 3rdparty/SOLAR)
 
 
 @dataclass
@@ -173,6 +174,53 @@ class TilingInfo:
 
 
 @dataclass
+class SolarAnalysisData:
+    """Solar-mode specific analysis results.
+
+    Holds the three SOL roofline models produced by SOLAR:
+    unfused, fused, and fused_prefetched.
+    """
+
+    # --- Per-model metrics ---
+    unfused_runtime_ms: float = 0.0
+    unfused_bottleneck: str = ""
+    unfused_arithmetic_intensity: float = 0.0
+    unfused_memory_bytes: int = 0
+    unfused_compute_cycles: int = 0
+
+    fused_runtime_ms: float = 0.0
+    fused_bottleneck: str = ""
+    fused_arithmetic_intensity: float = 0.0
+    fused_memory_bytes: int = 0
+
+    fused_prefetched_runtime_ms: float = 0.0
+    fused_prefetched_bottleneck: str = ""
+    fused_prefetched_arithmetic_intensity: float = 0.0
+    fused_prefetched_memory_bytes: int = 0
+
+    # --- Workload totals ---
+    total_macs: int = 0
+    total_flops: int = 0
+    num_layers: int = 0
+
+    # --- Memory breakdown ---
+    weight_bytes: int = 0
+    model_io_bytes: int = 0
+    intermediate_bytes: int = 0
+
+    # --- Speedup ratios ---
+    fused_speedup: float = 1.0
+    fused_prefetched_speedup: float = 1.0
+
+    # --- Architecture info ---
+    arch_name: str = ""
+    arch_freq_ghz: float = 1.0
+    arch_mac_per_cycle: float = 1.0
+    arch_dram_bw_per_cycle: float = 1.0
+    mac_per_cycle_key: str = ""
+
+
+@dataclass
 class AnalysisResult:
     """Output of a SOL analysis."""
 
@@ -205,6 +253,9 @@ class AnalysisResult:
     pipeline_schedule: PipelineSchedule | None = None
     pipeline_config: PipelineConfig | None = None
     tiling_info: TilingInfo | None = None
+
+    # ——— solar-specific results (None for non-solar modes) ———
+    solar_data: SolarAnalysisData | None = None
 
     def summary(self) -> str:
         """Return a one-line summary string."""
