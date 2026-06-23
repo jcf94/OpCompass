@@ -133,10 +133,12 @@ async function updateHardwareInfo() {
 
 // ── Pipeline config toggle ─────────────────────────────────────
 function togglePipelineConfig() {
-    if ($modeSelect.value === "pipeline") {
-        $pipelineConfig.classList.remove("hidden");
-    } else {
-        $pipelineConfig.classList.add("hidden");
+    if ($pipelineConfig) {
+        if ($modeSelect.value === "pipeline") {
+            $pipelineConfig.classList.remove("hidden");
+        } else {
+            $pipelineConfig.classList.add("hidden");
+        }
     }
     // Toggle solar results visibility
     const $solarResults = document.getElementById("solar-results");
@@ -368,19 +370,25 @@ function renderResults(data) {
     // Charts — need to reconstruct roofline data
     renderBreakdownChart(data);
 
-    const totalIo = data.total_read_bytes + data.total_write_bytes;
-    const oi = totalIo > 0 ? data.total_flops / totalIo : 1000;
-    const rooflineData = data.roofline_data || {};
-    const peakFlops = rooflineData.peak_flops || data.sol_tflops * 1e12;
-    const peakBw = rooflineData.peak_bandwidth || 2e12;
-    const achievable = rooflineData.achievable_flops || Math.min(peakFlops, oi * peakBw);
+    const rooflineCard = document.getElementById("roofline-card");
+    if (data.mode === "pipeline") {
+        rooflineCard?.classList.add("hidden");
+    } else {
+        rooflineCard?.classList.remove("hidden");
+        const totalIo = data.total_read_bytes + data.total_write_bytes;
+        const oi = totalIo > 0 ? data.total_flops / totalIo : 1000;
+        const rooflineData = data.roofline_data || {};
+        const peakFlops = rooflineData.peak_flops || data.sol_tflops * 1e12;
+        const peakBw = rooflineData.peak_bandwidth || 2e12;
+        const achievable = rooflineData.achievable_flops || Math.min(peakFlops, oi * peakBw);
 
-    renderRooflineChart({
-        operational_intensity: rooflineData.operational_intensity || oi,
-        peak_flops: peakFlops,
-        peak_bandwidth: peakBw,
-        achievable_flops: achievable,
-    }, data);
+        renderRooflineChart({
+            operational_intensity: rooflineData.operational_intensity || oi,
+            peak_flops: peakFlops,
+            peak_bandwidth: peakBw,
+            achievable_flops: achievable,
+        }, data);
+    }
 
     // Solar-specific rendering
     if (data.solar_data) {

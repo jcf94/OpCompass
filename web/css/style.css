@@ -1191,6 +1191,14 @@ footer {
   margin: 0 0 var(--space) 0;
 }
 
+.pipeline-inline-options {
+  display: grid;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-sm);
+  padding-bottom: var(--space-sm);
+  border-bottom: 1px solid var(--border);
+}
+
 .toggle-label {
   display: flex;
   align-items: center;
@@ -1254,9 +1262,9 @@ footer {
   grid-template-columns: 1fr 88px;
   gap: var(--space-xs) var(--space-sm);
   align-items: center;
-  margin-top: var(--space-sm);
-  padding-top: var(--space-sm);
-  border-top: 1px solid var(--border);
+  margin-bottom: var(--space-sm);
+  padding-bottom: var(--space-sm);
+  border-bottom: 1px solid var(--border);
 }
 
 .tile-input-grid label {
@@ -1274,6 +1282,7 @@ footer {
 .tile-reset {
   width: 100%;
   margin-top: var(--space-sm);
+  margin-bottom: var(--space-sm);
 }
 
 .tile-constraint-hint {

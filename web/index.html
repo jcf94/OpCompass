@@ -54,30 +54,6 @@
                     <option value="solar">SOLAR (torch graph)</option>
                 </select>
 
-                <div id="pipeline-config" class="pipeline-config-section hidden">
-                    <h3>Pipeline Options</h3>
-                    <label class="toggle-label">
-                        <span>Async Copy (CP.async)</span>
-                        <input type="checkbox" id="async-copy-toggle" checked>
-                        <span class="toggle-switch"></span>
-                    </label>
-                    <label class="toggle-label">
-                        <span>2:4 Sparsity</span>
-                        <input type="checkbox" id="sparsity-toggle">
-                        <span class="toggle-switch"></span>
-                    </label>
-                    <div class="tile-input-grid">
-                        <label for="block-m-input">Block M</label>
-                        <input type="number" id="block-m-input" min="1" step="1" placeholder="auto">
-                        <label for="block-n-input">Block N</label>
-                        <input type="number" id="block-n-input" min="1" step="1" placeholder="auto">
-                        <label for="block-k-input">Block K</label>
-                        <input type="number" id="block-k-input" min="1" step="1" placeholder="auto">
-                    </div>
-                    <div id="tile-constraint-hint" class="tile-constraint-hint"></div>
-                    <button type="button" id="tile-reset-btn" class="btn-mini tile-reset">Use Auto Tiles</button>
-                </div>
-
                 <div id="dim-inputs"><!-- dynamic --></div>
 
                 <button id="analyze-btn" class="btn-primary">Rerun Analysis</button>
@@ -112,7 +88,7 @@
                     <h2>Time Breakdown</h2>
                     <canvas id="breakdown-chart"></canvas>
                 </div>
-                <div class="card chart-container">
+                <div class="card chart-container" id="roofline-card">
                     <h2>Roofline Model</h2>
                     <canvas id="roofline-chart"></canvas>
                 </div>
@@ -157,10 +133,32 @@
                 <div class="card-row pipeline-stats-row">
                     <div class="card">
                         <h2>Pipeline Schedule</h2>
+                        <div class="pipeline-inline-options">
+                            <label class="toggle-label">
+                                <span>Async Copy (CP.async)</span>
+                                <input type="checkbox" id="async-copy-toggle" checked>
+                                <span class="toggle-switch"></span>
+                            </label>
+                            <label class="toggle-label">
+                                <span>2:4 Sparsity</span>
+                                <input type="checkbox" id="sparsity-toggle">
+                                <span class="toggle-switch"></span>
+                            </label>
+                        </div>
                         <div id="pipeline-stats-content"></div>
                     </div>
                     <div class="card">
                         <h2>Tiling Strategy</h2>
+                        <div class="tile-input-grid">
+                            <label for="block-m-input">Block M</label>
+                            <input type="number" id="block-m-input" min="1" step="1" placeholder="auto">
+                            <label for="block-n-input">Block N</label>
+                            <input type="number" id="block-n-input" min="1" step="1" placeholder="auto">
+                            <label for="block-k-input">Block K</label>
+                            <input type="number" id="block-k-input" min="1" step="1" placeholder="auto">
+                        </div>
+                        <div id="tile-constraint-hint" class="tile-constraint-hint"></div>
+                        <button type="button" id="tile-reset-btn" class="btn-mini tile-reset">Use Auto Tiles</button>
                         <div id="tiling-info-content"></div>
                     </div>
                 </div>
