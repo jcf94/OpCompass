@@ -5,18 +5,19 @@ from opcompass.models import DataType, AnalysisMode
 from opcompass.engine.analyzer import Analyzer
 
 
-def test_matmul_a100_fp16_hierarchy():
+def test_matmul_a100_fp16_hierarchy_roofline():
     op = get_operator("matmul")()
     hw = get_hardware("a100")()
 
     analyzer = Analyzer()
     result = analyzer.analyze(
-        op, hw, DataType.FP16, mode=AnalysisMode.HIERARCHY,
+        op, hw, DataType.FP16, mode=AnalysisMode.HIERARCHY_ROOFLINE,
         M=4096, N=4096, K=4096,
     )
 
     assert result.operator == "matmul"
     assert result.hardware == "a100"
+    assert result.mode == AnalysisMode.HIERARCHY_ROOFLINE
     assert result.total_flops == 137_438_953_472
     assert result.memory_read_time_s > 0
     assert result.compute_time_s > 0
@@ -26,17 +27,17 @@ def test_matmul_a100_fp16_hierarchy():
     assert result.bottleneck == "compute"
 
 
-def test_matmul_a100_fp16_simple():
+def test_matmul_a100_fp16_default_mode():
+    """Default mode (no mode specified) should be HIERARCHY_ROOFLINE."""
     op = get_operator("matmul")()
     hw = get_hardware("a100")()
 
     analyzer = Analyzer()
     result = analyzer.analyze(
-        op, hw, DataType.FP16, mode=AnalysisMode.SIMPLE,
-        M=4096, N=4096, K=4096,
+        op, hw, DataType.FP16, M=4096, N=4096, K=4096,
     )
 
-    assert result.mode == AnalysisMode.SIMPLE
+    assert result.mode == AnalysisMode.HIERARCHY_ROOFLINE
     assert result.sol_time_s > 0
 
 
@@ -46,7 +47,7 @@ def test_matmul_h100_fp16():
 
     analyzer = Analyzer()
     result = analyzer.analyze(
-        op, hw, DataType.FP16, mode=AnalysisMode.HIERARCHY,
+        op, hw, DataType.FP16, mode=AnalysisMode.HIERARCHY_ROOFLINE,
         M=4096, N=4096, K=4096,
     )
 
@@ -61,7 +62,7 @@ def test_matmul_fp32_memory_bound():
 
     analyzer = Analyzer()
     result = analyzer.analyze(
-        op, hw, DataType.FP32, mode=AnalysisMode.HIERARCHY,
+        op, hw, DataType.FP32, mode=AnalysisMode.HIERARCHY_ROOFLINE,
         M=128, N=128, K=128,
     )
 

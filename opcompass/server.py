@@ -257,14 +257,14 @@ def api_analyze(body: Dict[str, Any]) -> Dict[str, Any]:
             "operator": "matmul",
             "hardware": "a100",
             "dtype": "fp16",
-            "mode": "hierarchy",
+            "mode": "hierarchy_roofline",
             "dims": {"M": 4096, "N": 4096, "K": 4096}
         }
     """
     operator_name = body.get("operator")
     hardware_name = body.get("hardware")
     dtype_str = body.get("dtype", "fp16")
-    mode_str = body.get("mode", "hierarchy")
+    mode_str = body.get("mode", "hierarchy_roofline")
     dims = body.get("dims", {})
     pipeline_config_dict = body.get("pipeline_config", None)
 

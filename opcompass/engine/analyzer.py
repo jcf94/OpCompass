@@ -39,26 +39,26 @@ class Analyzer:
         from opcompass.models import AnalysisMode, AnalysisResult, PipelineConfig
 
         if mode is None:
-            mode = AnalysisMode.HIERARCHY
+            mode = AnalysisMode.HIERARCHY_ROOFLINE
 
         # ── Pipeline mode: use the new DAG-based scheduler ────────────
         if mode == AnalysisMode.PIPELINE:
             return self._analyze_pipeline(operator, hardware, dtype, pipeline_config, dims)
 
-        # ── SIMPLE / HIERARCHY modes: unchanged ───────────────────────
+        # ── HIERARCHY_ROOFLINE mode ────────────────────────────────────
         # 1. Fundamental quantities — always from the operator
         total_flops = operator.compute_flops(**dims)
         read_bytes, write_bytes = operator.compute_io_bytes(dtype, **dims)
 
         # 2. Per-phase times
         mem_read_time = self._estimate_memory_time(
-            read_bytes, hardware, mode
+            read_bytes, hardware
         )
         compute_time = self._estimate_compute_time(
-            total_flops, hardware, dtype, mode
+            total_flops, hardware, dtype
         )
         mem_write_time = self._estimate_memory_time(
-            write_bytes, hardware, mode
+            write_bytes, hardware
         )
 
         # 3. Synthesis — factor in overlap
@@ -95,7 +95,7 @@ class Analyzer:
             sol_time_s=sol_time,
             sol_tflops=sol_tflops,
             stage_breakdown=self._build_stage_breakdown(
-                read_bytes, write_bytes, total_flops, hardware, dtype, mode
+                read_bytes, write_bytes, total_flops, hardware, dtype
             ),
             roofline_data=self._build_roofline_data(
                 total_flops, read_bytes + write_bytes, hardware, dtype
@@ -124,13 +124,13 @@ class Analyzer:
         # Get sub-op decomposition
         sub_ops = operator.get_ops_breakdown(dtype, hardware, pipeline_config, **dims)
 
-        # Fallback to HIERARCHY if operator doesn't support pipeline
+        # Fallback to roofline if operator doesn't support pipeline
         if not sub_ops or not tiling:
             total_flops = operator.compute_flops(**dims)
             read_bytes, write_bytes = operator.compute_io_bytes(dtype, **dims)
-            mem_read_time = self._estimate_memory_time(read_bytes, hardware, AnalysisMode.HIERARCHY)
-            compute_time = self._estimate_compute_time(total_flops, hardware, dtype, AnalysisMode.HIERARCHY)
-            mem_write_time = self._estimate_memory_time(write_bytes, hardware, AnalysisMode.HIERARCHY)
+            mem_read_time = self._estimate_memory_time(read_bytes, hardware)
+            compute_time = self._estimate_compute_time(total_flops, hardware, dtype)
+            mem_write_time = self._estimate_memory_time(write_bytes, hardware)
             overlap = hardware.memory.can_overlap_with_compute
             sol_time = max(compute_time, mem_read_time, mem_write_time) if overlap else (mem_read_time + compute_time + mem_write_time)
             times = {"memory_read": mem_read_time, "compute": compute_time, "memory_write": mem_write_time}
@@ -166,9 +166,9 @@ class Analyzer:
         sol_tflops = (total_flops / sol_time / 1e12) if sol_time > 0 else float("inf")
 
         # Also compute the traditional read/compute/write breakdown
-        mem_read_time = self._estimate_memory_time(read_bytes, hardware, AnalysisMode.HIERARCHY)
-        compute_time = self._estimate_compute_time(total_flops, hardware, dtype, AnalysisMode.HIERARCHY)
-        mem_write_time = self._estimate_memory_time(write_bytes, hardware, AnalysisMode.HIERARCHY)
+        mem_read_time = self._estimate_memory_time(read_bytes, hardware)
+        compute_time = self._estimate_compute_time(total_flops, hardware, dtype)
+        mem_write_time = self._estimate_memory_time(write_bytes, hardware)
 
         return AnalysisResult(
             operator=operator.name,
@@ -199,27 +199,19 @@ class Analyzer:
     # ------------------------------------------------------------------
 
     def _estimate_memory_time(
-        self, byte_count: int, hardware: Hardware, mode, tier_index: int = 0
+        self, byte_count: int, hardware: Hardware, tier_index: int = 0
     ) -> float:
         """Estimate the minimum time to move *byte_count* through memory."""
         if byte_count <= 0:
             return 0.0
 
-        from opcompass.models import AnalysisMode
-
-        if mode == AnalysisMode.SIMPLE:
-            # Use only HBM bandwidth
-            bw = hardware.hbm_bandwidth
-            return byte_count / bw if bw > 0 else 0.0
-
-        # HIERARCHY: use the first (slowest) tier
         tiers = hardware.memory.tiers
         if tiers:
             return tiers[tier_index].transfer_time(byte_count)
         return 0.0
 
     def _estimate_compute_time(
-        self, flops: int, hardware: Hardware, dtype, mode
+        self, flops: int, hardware: Hardware, dtype
     ) -> float:
         """Estimate the minimum compute time."""
         if flops <= 0:
@@ -233,13 +225,13 @@ class Analyzer:
         return flops / (peak * utilization)
 
     def _build_stage_breakdown(
-        self, read_bytes, write_bytes, flops, hardware, dtype, mode
+        self, read_bytes, write_bytes, flops, hardware, dtype
     ) -> dict[str, float]:
         """Build a per-stage time breakdown for display."""
         return {
-            "read": self._estimate_memory_time(read_bytes, hardware, mode),
-            "compute": self._estimate_compute_time(flops, hardware, dtype, mode),
-            "write": self._estimate_memory_time(write_bytes, hardware, mode),
+            "read": self._estimate_memory_time(read_bytes, hardware),
+            "compute": self._estimate_compute_time(flops, hardware, dtype),
+            "write": self._estimate_memory_time(write_bytes, hardware),
         }
 
     def _build_roofline_data(

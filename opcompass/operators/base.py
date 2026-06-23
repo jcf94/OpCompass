@@ -27,9 +27,10 @@ class Operator(ABC):
         """
         return {}
 
-    @abstractmethod
     def compute_torch(self, inputs: list["torch.Tensor"], **kwargs) -> list["torch.Tensor"]:
-        """Compute the operator using PyTorch.
+        """Compute the operator using PyTorch (optional).
+
+        Override this in subclasses to enable PyTorch-based validation.
 
         Args:
             inputs: List of input tensors.
@@ -38,7 +39,7 @@ class Operator(ABC):
         Returns:
             List of output tensors.
         """
-        ...
+        raise NotImplementedError(f"{self.name}: compute_torch not implemented")
 
     @abstractmethod
     def compute_flops(self, **dims: int) -> int:

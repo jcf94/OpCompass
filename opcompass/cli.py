@@ -144,7 +144,7 @@ def info_cmd(operator_name: str):
 @main.command("analyze", context_settings={"ignore_unknown_options": True, "allow_extra_args": True})
 @click.option("--hardware", "-H", required=True, help="Hardware target (e.g. a100)")
 @click.option("--dtype", "-d", default="fp16", help="Data type (default: fp16)")
-@click.option("--mode", "-m", default="hierarchy", help="Analysis mode: simple, hierarchy, pipeline")
+@click.option("--mode", "-m", default="hierarchy_roofline", help="Analysis mode: hierarchy_roofline, pipeline")
 @click.option("--format", "-f", "fmt", default="table", help="Output format: table, json, csv")
 @click.option("--async-copy/--no-async-copy", default=True, help="Enable/disable async copy (pipeline mode)")
 @click.option("--sparsity/--no-sparsity", default=False, help="Enable/disable 2:4 sparsity (pipeline mode)")
@@ -220,7 +220,7 @@ def analyze_cmd(
 @main.command("sweep", context_settings={"ignore_unknown_options": True, "allow_extra_args": True})
 @click.option("--hardware", "-H", required=True, help="Hardware target(s), comma-separated (e.g. a100,h100)")
 @click.option("--dtype", "-d", default="fp16", help="Data type")
-@click.option("--mode", "-m", default="hierarchy", help="Analysis mode")
+@click.option("--mode", "-m", default="hierarchy_roofline", help="Analysis mode: hierarchy_roofline, pipeline")
 @click.option("--format", "-f", "fmt", default="table", help="Output format: table, json, csv")
 @click.argument("operator_name")
 @click.pass_context

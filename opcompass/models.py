@@ -38,9 +38,8 @@ class DataType(str, Enum):
 class AnalysisMode(str, Enum):
     """Analysis precision mode."""
 
-    SIMPLE = "simple"       # Pure roofline: max(FLOPs/peak, bytes/bandwidth)
-    HIERARCHY = "hierarchy"  # Multi-level memory hierarchy
-    PIPELINE = "pipeline"   # Pipeline stage-level modeling
+    HIERARCHY_ROOFLINE = "hierarchy_roofline"  # Roofline with multi-tier memory hierarchy
+    PIPELINE = "pipeline"                     # Pipeline stage-level modeling
 
 
 @dataclass
@@ -181,7 +180,7 @@ class AnalysisResult:
     hardware: str
     shapes: dict[str, int] = field(default_factory=dict)
     dtype: DataType = DataType.FP16
-    mode: AnalysisMode = AnalysisMode.HIERARCHY
+    mode: AnalysisMode = AnalysisMode.HIERARCHY_ROOFLINE
 
     # ——— fundamental quantities ———
     total_flops: int = 0
