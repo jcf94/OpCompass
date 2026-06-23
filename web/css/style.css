@@ -438,6 +438,22 @@ select:focus, input:focus {
 }
 .chart-container canvas { flex: 1; max-height: 300px; }
 
+.chart-unavailable {
+  flex: 1;
+  min-height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-lg);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-align: center;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-inset);
+}
+
 /* ── Detail Table ───────────────────────────────────────────────── */
 #detail-table-container { overflow-x: auto; }
 

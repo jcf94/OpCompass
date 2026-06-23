@@ -232,17 +232,15 @@ function renderResults(data) {
     // Charts — need to reconstruct roofline data
     renderBreakdownChart(data);
 
-    const peakFlops = data.sol_tflops * 1e12;
-    const peakBw = data.sol_time_us > 0 && data.memory_read_time_us > 0
-        ? data.total_read_bytes / data.memory_read_time_us * 1e6
-        : 2e12;
-
     const totalIo = data.total_read_bytes + data.total_write_bytes;
     const oi = totalIo > 0 ? data.total_flops / totalIo : 1000;
-    const achievable = Math.min(peakFlops, oi * peakBw);
+    const rooflineData = data.roofline_data || {};
+    const peakFlops = rooflineData.peak_flops || data.sol_tflops * 1e12;
+    const peakBw = rooflineData.peak_bandwidth || 2e12;
+    const achievable = rooflineData.achievable_flops || Math.min(peakFlops, oi * peakBw);
 
     renderRooflineChart({
-        operational_intensity: oi,
+        operational_intensity: rooflineData.operational_intensity || oi,
         peak_flops: peakFlops,
         peak_bandwidth: peakBw,
         achievable_flops: achievable,
@@ -296,6 +294,12 @@ function renderSolarResults(sd) {
 }
 
 function renderSolarRuntimeChart(sd) {
+    if (typeof CHARTS_AVAILABLE === "undefined" || !CHARTS_AVAILABLE) {
+        if (typeof renderChartUnavailable === "function") {
+            renderChartUnavailable("solar-runtime-chart");
+        }
+        return;
+    }
     const canvas = document.getElementById("solar-runtime-chart");
     if (!canvas) return;
     // Destroy previous chart instance stored on the element
@@ -347,6 +351,12 @@ function renderSolarRuntimeChart(sd) {
 }
 
 function renderSolarMemoryChart(sd) {
+    if (typeof CHARTS_AVAILABLE === "undefined" || !CHARTS_AVAILABLE) {
+        if (typeof renderChartUnavailable === "function") {
+            renderChartUnavailable("solar-memory-chart");
+        }
+        return;
+    }
     const canvas = document.getElementById("solar-memory-chart");
     if (!canvas) return;
     if (canvas._chart) canvas._chart.destroy();

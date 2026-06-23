@@ -49,6 +49,7 @@ def _result_to_dict(result: AnalysisResult) -> dict:
         "sol_tflops": result.sol_tflops,
         "bottleneck": result.bottleneck,
         "stage_breakdown": result.stage_breakdown,
+        "roofline_data": result.roofline_data,
     }
 
     # Pipeline-specific fields
