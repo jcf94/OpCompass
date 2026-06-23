@@ -370,6 +370,7 @@ function renderPipeline() {
     }
 
     // ── Interconnect info ──────────────────────────────────────
+    const stageNames = stages.map(s => s.name);
     html += `
     <div style="margin-top:var(--space);padding-top:var(--space);border-top:1px solid var(--border-light);font-size:var(--text-xs);color:var(--text-muted);font-family:var(--font-mono)">
       ${cu.warp_schedulers_per_unit} warp schedulers · ${cu.max_concurrent_warps} warps / ${cu.max_threads_per_unit} threads max &nbsp;|&nbsp;
