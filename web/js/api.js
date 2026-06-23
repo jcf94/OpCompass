@@ -33,9 +33,9 @@ const API = {
     getHardwareOverview() { return this._get("/hardware/overview"); },
 
     /** Run a SOL analysis. */
-    analyze(operator, hardware, dtype, mode, dims) {
-        return this._post("/analyze", {
-            operator, hardware, dtype, mode, dims,
-        });
+    analyze(operator, hardware, dtype, mode, dims, pipelineConfig) {
+        const body = { operator, hardware, dtype, mode, dims };
+        if (pipelineConfig) body.pipeline_config = pipelineConfig;
+        return this._post("/analyze", body);
     },
 };

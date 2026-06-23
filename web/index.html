@@ -49,14 +49,28 @@
 
                 <label for="mode-select">Analysis Mode</label>
                 <select id="mode-select">
-                    <option value="hierarchy">Hierarchy (recommended)</option>
-                    <option value="simple">Simple (roofline)</option>
+                    <option value="hierarchy_roofline">Hierarchy Roofline (recommended)</option>
                     <option value="pipeline">Pipeline</option>
+                    <option value="solar">SOLAR (torch graph)</option>
                 </select>
+
+                <div id="pipeline-config" class="pipeline-config-section hidden">
+                    <h3>Pipeline Options</h3>
+                    <label class="toggle-label">
+                        <span>Async Copy (CP.async)</span>
+                        <input type="checkbox" id="async-copy-toggle" checked>
+                        <span class="toggle-switch"></span>
+                    </label>
+                    <label class="toggle-label">
+                        <span>2:4 Sparsity</span>
+                        <input type="checkbox" id="sparsity-toggle">
+                        <span class="toggle-switch"></span>
+                    </label>
+                </div>
 
                 <div id="dim-inputs"><!-- dynamic --></div>
 
-                <button id="analyze-btn" class="btn-primary">Run Analysis</button>
+                <button id="analyze-btn" class="btn-primary">Rerun Analysis</button>
             </section>
 
             <section class="card" id="hardware-info">
@@ -97,6 +111,81 @@
             <div class="card" id="detail-table-container">
                 <h2>Detailed Metrics</h2>
                 <table id="detail-table"><tbody></tbody></table>
+            </div>
+
+            <div id="solar-results" class="hidden">
+                <div class="card-row">
+                    <div class="card chart-container">
+                        <h2>SOLAR Roofline — Runtime by Model</h2>
+                        <canvas id="solar-runtime-chart"></canvas>
+                    </div>
+                    <div class="card chart-container">
+                        <h2>SOLAR Memory Breakdown</h2>
+                        <canvas id="solar-memory-chart"></canvas>
+                    </div>
+                </div>
+
+                <div class="card-row solar-stats-row">
+                    <div class="card">
+                        <h2>SOLAR Performance Models</h2>
+                        <table id="solar-perf-table">
+                            <thead><tr><th>Model</th><th>Runtime (ms)</th><th>Bottleneck</th><th>AI (FLOP/B)</th><th>Memory (GB)</th></tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="card">
+                        <h2>Speedup Ratios</h2>
+                        <table id="solar-speedup-table">
+                            <thead><tr><th>Comparison</th><th>Speedup</th></tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="pipeline-results" class="hidden">
+                <div class="card-row pipeline-stats-row">
+                    <div class="card">
+                        <h2>Pipeline Schedule</h2>
+                        <div id="pipeline-stats-content"></div>
+                    </div>
+                    <div class="card">
+                        <h2>Tiling Strategy</h2>
+                        <div id="tiling-info-content"></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>Pipeline Gantt Chart</h2>
+                    <div class="gantt-toolbar">
+                        <div class="gantt-toolbar-group">
+                            <label>Iterations</label>
+                            <input type="number" id="iter-start" min="0" value="0" class="iter-input">
+                            <span class="iter-sep">—</span>
+                            <input type="number" id="iter-end" min="1" value="8" class="iter-input">
+                        </div>
+                        <div class="gantt-toolbar-group">
+                            <button class="btn-mini" data-preset="first8">First 8</button>
+                            <button class="btn-mini" data-preset="last8">Last 8</button>
+                            <button class="btn-mini" data-preset="all">All</button>
+                        </div>
+                        <div class="gantt-toolbar-group">
+                            <button class="btn-mini" id="zoom-reset">Reset Zoom</button>
+                            <span class="gantt-hint">Scroll to zoom · Drag to pan</span>
+                        </div>
+                    </div>
+                    <div id="gantt-chart-container">
+                        <canvas id="gantt-chart"></canvas>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>Stage Breakdown</h2>
+                    <table id="pipeline-stage-table">
+                        <thead><tr><th>Stage</th><th>Time</th><th>Work Units</th><th>Iteration</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
             </div>
         </section>
     </div>
@@ -172,6 +261,7 @@
 
 <script src="/static/js/api.js"></script>
 <script src="/static/js/charts.js"></script>
+<script src="/static/js/pipeline.js"></script>
 <script src="/static/js/hardware.js"></script>
 <script src="/static/js/overview.js"></script>
 <script src="/static/js/app.js"></script>

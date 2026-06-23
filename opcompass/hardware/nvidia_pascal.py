@@ -221,7 +221,9 @@ class NvidiaP100(NvidiaPascal):
                 bandwidth_bytes_per_sec=2.0e12,       # Approximate
             ),
         ],
-        can_overlap_with_compute={"HBM2"},
+        # Pascal has no async copy engine (introduced in Ampere);
+        # overlapped load/store is at the SM scheduler level, not HBM DMA.
+        can_overlap_with_compute=set(),
     )
 
     # ── Compute unit ──────────────────────────────────────────────────

@@ -81,7 +81,6 @@ class NvidiaFermi(Hardware):
     # ── Per-SM memory resources ──────────────────────────────────────
     register_file_kb = 128       # 32768 × 32-bit registers
     shared_memory_max_kb = 48    # Max configurable (alt: 16 KB with 48 KB L1)
-    l1_max_kb = 48               # Max configurable (alt: 16 KB with 48 KB shared)
     l1_shared_combined_kb = 64   # Total on-chip SRAM pool
 
     # ── Per-SM execution resources ───────────────────────────────────

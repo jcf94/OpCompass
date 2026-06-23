@@ -38,9 +38,9 @@ class DataType(str, Enum):
 class AnalysisMode(str, Enum):
     """Analysis precision mode."""
 
-    SIMPLE = "simple"       # Pure roofline: max(FLOPs/peak, bytes/bandwidth)
-    HIERARCHY = "hierarchy"  # Multi-level memory hierarchy
-    PIPELINE = "pipeline"   # Pipeline stage-level modeling
+    HIERARCHY_ROOFLINE = "hierarchy_roofline"  # Roofline with multi-tier memory hierarchy
+    PIPELINE = "pipeline"                     # Pipeline stage-level modeling
+    SOLAR = "solar"                           # SOLAR torch graph analysis (via 3rdparty/SOLAR)
 
 
 @dataclass
@@ -113,6 +113,14 @@ class ComputeUnit:
 
 
 @dataclass
+class PipelineConfig:
+    """Hardware feature toggles for pipeline analysis."""
+
+    async_copy_enabled: bool = True       # Use async_copy_load vs global_read path
+    sparsity_2_4_enabled: bool = False    # 2:4 structured sparsity doubles MMA throughput
+
+
+@dataclass
 class SubOp:
     """A sub-operation within an operator, for pipeline-level analysis."""
 
@@ -121,6 +129,37 @@ class SubOp:
     read_bytes: int = 0             # Bytes read from memory hierarchy
     write_bytes: int = 0            # Bytes written
     depends_on: list[str] = field(default_factory=list)  # Names of sub-ops this depends on
+    pipeline_stage: str = ""        # Explicit mapping to PipelineStage.name
+    is_recurring: bool = False      # True if this sub-op repeats per K-slice iteration
+
+
+@dataclass
+class ScheduledSubOp:
+    """A sub-op placed on the cycle timeline by the scheduler."""
+
+    name: str                       # e.g., "async_copy_load_A_k3"
+    pipeline_stage: str             # PipelineStage.name it maps to
+    start_cycle: int                # Cycle where this sub-op begins
+    end_cycle: int                  # Cycle where this sub-op completes
+    duration_cycles: int            # end_cycle - start_cycle
+    work_units: int                 # Bytes or FMA ops processed
+    iteration: int = 0              # K-slice iteration index (0-based)
+
+
+@dataclass
+class PipelineSchedule:
+    """Complete pipeline schedule output."""
+
+    sub_ops: list[ScheduledSubOp]
+    total_cycles_per_block: int     # Cycles for one thread-block to complete
+    total_time_s: float             # Seconds (cycles × clock_period × waves)
+    wave_count: int                 # ceil(grid_size / num_compute_units)
+    grid_size: int                  # Total thread-blocks launched
+    num_k_iterations: int           # ceil(K / block_K)
+    bottleneck_stage: str           # PipelineStage name of the bottleneck
+    per_iteration_cycles: int       # Cycles for one K-slice in steady state
+    prologue_cycles: int            # Cycles for first iteration (no overlap)
+    epilogue_cycles: int            # Cycles for final store + write-back
 
 
 @dataclass
@@ -135,6 +174,53 @@ class TilingInfo:
 
 
 @dataclass
+class SolarAnalysisData:
+    """Solar-mode specific analysis results.
+
+    Holds the three SOL roofline models produced by SOLAR:
+    unfused, fused, and fused_prefetched.
+    """
+
+    # --- Per-model metrics ---
+    unfused_runtime_ms: float = 0.0
+    unfused_bottleneck: str = ""
+    unfused_arithmetic_intensity: float = 0.0
+    unfused_memory_bytes: int = 0
+    unfused_compute_cycles: int = 0
+
+    fused_runtime_ms: float = 0.0
+    fused_bottleneck: str = ""
+    fused_arithmetic_intensity: float = 0.0
+    fused_memory_bytes: int = 0
+
+    fused_prefetched_runtime_ms: float = 0.0
+    fused_prefetched_bottleneck: str = ""
+    fused_prefetched_arithmetic_intensity: float = 0.0
+    fused_prefetched_memory_bytes: int = 0
+
+    # --- Workload totals ---
+    total_macs: int = 0
+    total_flops: int = 0
+    num_layers: int = 0
+
+    # --- Memory breakdown ---
+    weight_bytes: int = 0
+    model_io_bytes: int = 0
+    intermediate_bytes: int = 0
+
+    # --- Speedup ratios ---
+    fused_speedup: float = 1.0
+    fused_prefetched_speedup: float = 1.0
+
+    # --- Architecture info ---
+    arch_name: str = ""
+    arch_freq_ghz: float = 1.0
+    arch_mac_per_cycle: float = 1.0
+    arch_dram_bw_per_cycle: float = 1.0
+    mac_per_cycle_key: str = ""
+
+
+@dataclass
 class AnalysisResult:
     """Output of a SOL analysis."""
 
@@ -142,7 +228,7 @@ class AnalysisResult:
     hardware: str
     shapes: dict[str, int] = field(default_factory=dict)
     dtype: DataType = DataType.FP16
-    mode: AnalysisMode = AnalysisMode.HIERARCHY
+    mode: AnalysisMode = AnalysisMode.HIERARCHY_ROOFLINE
 
     # ——— fundamental quantities ———
     total_flops: int = 0
@@ -162,6 +248,14 @@ class AnalysisResult:
     # ——— detailed breakdown ———
     stage_breakdown: dict[str, float] = field(default_factory=dict)
     roofline_data: dict[str, Any] = field(default_factory=dict)
+
+    # ——— pipeline-specific results (None for non-pipeline modes) ———
+    pipeline_schedule: PipelineSchedule | None = None
+    pipeline_config: PipelineConfig | None = None
+    tiling_info: TilingInfo | None = None
+
+    # ——— solar-specific results (None for non-solar modes) ———
+    solar_data: SolarAnalysisData | None = None
 
     def summary(self) -> str:
         """Return a one-line summary string."""

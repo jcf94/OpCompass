@@ -255,7 +255,9 @@ class NvidiaV100(NvidiaVolta):
                 bandwidth_bytes_per_sec=3.0e12,       # Approximate
             ),
         ],
-        can_overlap_with_compute={"HBM2"},
+        # Volta has no async copy engine (introduced in Ampere);
+        # overlapped FP32+INT32 execution is per-SM, not HBM DMA overlap.
+        can_overlap_with_compute=set(),
     )
 
     # ── Compute unit ──────────────────────────────────────────────────
