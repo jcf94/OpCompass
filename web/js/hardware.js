@@ -135,6 +135,13 @@ function renderMemoryHierarchy() {
 // ── SM Architecture ───────────────────────────────────────────────
 function renderSMArchitecture() {
     const cu = hwDetail.compute_unit;
+    const tensorCoreGen = {
+        Volta: '1st Gen',
+        Turing: '2nd Gen',
+        Ampere: '3rd Gen',
+        Hopper: '4th Gen',
+        Blackwell: '5th Gen',
+    }[hwDetail.architecture] || '';
     $smArch.innerHTML = `
         <div class="sm-grid">
             <div class="sm-item">
@@ -143,7 +150,7 @@ function renderSMArchitecture() {
             </div>
             <div class="sm-item">
                 <div class="sm-num">${cu.tensor_cores_per_unit}</div>
-                <div class="sm-label">Tensor Cores <span class="sm-sub">3rd Gen</span></div>
+                <div class="sm-label">Tensor Cores ${tensorCoreGen ? `<span class="sm-sub">${tensorCoreGen}</span>` : ''}</div>
             </div>
             <div class="sm-item">
                 <div class="sm-num">${cu.fp32_cores_per_unit}</div>
@@ -178,6 +185,11 @@ function renderSMArchitecture() {
 // ── Concurrent Execution ──────────────────────────────────────────
 function renderConcurrent() {
     const cu = hwDetail.compute_unit;
+    const stageNames = (cu.pipeline || []).map(s => s.name);
+    const hasAsyncCopy = stageNames.some(name => name.includes('async_copy'));
+    const hasTensorCores = cu.tensor_cores_per_unit > 0;
+    const hasAsyncBarrier = ['Ampere', 'Hopper', 'Blackwell'].includes(hwDetail.architecture);
+    const hasWarpReduce = ['Ampere', 'Hopper', 'Blackwell'].includes(hwDetail.architecture);
     const overlaps = [
         {
             icon: '↻',
@@ -190,8 +202,10 @@ function renderConcurrent() {
         {
             icon: '⇅',
             title: 'Async Copy + Compute Overlap',
-            desc: 'The async copy engine moves data from global memory directly into shared memory, bypassing L1 and the register file. Compute proceeds in parallel during transfer.',
-            active: true,
+            desc: hasAsyncCopy
+                ? 'The async copy engine moves data from global memory directly into shared memory. Compute proceeds in parallel during transfer.'
+                : 'No dedicated async copy stage is modeled for this architecture.',
+            active: hasAsyncCopy,
         },
         {
             icon: '∥',
@@ -202,14 +216,26 @@ function renderConcurrent() {
         {
             icon: '⊓',
             title: 'Async Barriers',
-            desc: 'Hardware-accelerated barrier objects separate arrive from wait, enabling efficient producer-consumer pipelines without blocking warps.',
-            active: true,
+            desc: hasAsyncBarrier
+                ? 'Hardware-accelerated barrier objects separate arrive from wait, enabling efficient producer-consumer pipelines.'
+                : 'Not modeled as a hardware feature for this architecture.',
+            active: hasAsyncBarrier,
         },
         {
             icon: 'Σ',
             title: 'Warp-Level Reduction (1-step)',
-            desc: 'Hardware-accelerated warp reductions (ADD, MIN, MAX, AND, OR, XOR) complete in a single step, replacing 5-step SHFL on previous architectures.',
-            active: true,
+            desc: hasWarpReduce
+                ? 'Hardware-accelerated warp reductions complete in a single step for supported operations.'
+                : 'Not modeled as a hardware feature for this architecture.',
+            active: hasWarpReduce,
+        },
+        {
+            icon: '⊗',
+            title: 'Tensor Core MMA',
+            desc: hasTensorCores
+                ? `${cu.tensor_cores_per_unit} Tensor Cores per ${cu.name} are modeled for matrix operations.`
+                : 'This architecture predates Tensor Cores.',
+            active: hasTensorCores,
         },
     ];
 
@@ -344,10 +370,11 @@ function renderPipeline() {
     }
 
     // ── Interconnect info ──────────────────────────────────────
+    const stageNames = stages.map(s => s.name);
     html += `
     <div style="margin-top:var(--space);padding-top:var(--space);border-top:1px solid var(--border-light);font-size:var(--text-xs);color:var(--text-muted);font-family:var(--font-mono)">
       ${cu.warp_schedulers_per_unit} warp schedulers · ${cu.max_concurrent_warps} warps / ${cu.max_threads_per_unit} threads max &nbsp;|&nbsp;
-      NVLink 3.0: 600 GB/s &nbsp;|&nbsp; PCIe Gen 4: 31.5 GB/s
+      ${stageNames.length} modeled pipeline stages
     </div>`;
 
     $pipelineFlow.innerHTML = html;

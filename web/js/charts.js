@@ -25,17 +25,41 @@ let breakdownChart = null;
 let rooflineChart = null;
 
 // ── Chart.js global defaults ──────────────────────────────────────
-Chart.defaults.color = C.muted;
-Chart.defaults.borderColor = C.grid;
-Chart.defaults.font.family = "'Inter', sans-serif";
-Chart.defaults.font.size = 11;
-Chart.defaults.plugins.tooltip.backgroundColor = '#1b1b1b';
-Chart.defaults.plugins.tooltip.titleColor = '#fff';
-Chart.defaults.plugins.tooltip.bodyColor = '#e0e0e0';
-Chart.defaults.plugins.tooltip.cornerRadius = 6;
-Chart.defaults.plugins.tooltip.padding = 10;
+const CHARTS_AVAILABLE = typeof Chart !== 'undefined';
+window.CHARTS_AVAILABLE = CHARTS_AVAILABLE;
+
+if (CHARTS_AVAILABLE) {
+    Chart.defaults.color = C.muted;
+    Chart.defaults.borderColor = C.grid;
+    Chart.defaults.font.family = "'Inter', sans-serif";
+    Chart.defaults.font.size = 11;
+    Chart.defaults.plugins.tooltip.backgroundColor = '#1b1b1b';
+    Chart.defaults.plugins.tooltip.titleColor = '#fff';
+    Chart.defaults.plugins.tooltip.bodyColor = '#e0e0e0';
+    Chart.defaults.plugins.tooltip.cornerRadius = 6;
+    Chart.defaults.plugins.tooltip.padding = 10;
+}
+
+function renderChartUnavailable(canvasId) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    const parent = canvas.parentElement;
+    if (!parent) return;
+    canvas.style.display = 'none';
+    let msg = parent.querySelector('.chart-unavailable');
+    if (!msg) {
+        msg = document.createElement('div');
+        msg.className = 'chart-unavailable';
+        msg.textContent = 'Chart library unavailable. Metrics tables are still valid.';
+        parent.appendChild(msg);
+    }
+}
 
 function renderBreakdownChart(data) {
+    if (!CHARTS_AVAILABLE) {
+        renderChartUnavailable('breakdown-chart');
+        return;
+    }
     const ctx = document.getElementById('breakdown-chart').getContext('2d');
     if (breakdownChart) breakdownChart.destroy();
 
@@ -103,6 +127,10 @@ function renderBreakdownChart(data) {
 }
 
 function renderRooflineChart(rooflineData, resultData) {
+    if (!CHARTS_AVAILABLE) {
+        renderChartUnavailable('roofline-chart');
+        return;
+    }
     const ctx = document.getElementById('roofline-chart').getContext('2d');
     if (rooflineChart) rooflineChart.destroy();
 

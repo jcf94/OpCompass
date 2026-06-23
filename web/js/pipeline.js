@@ -497,7 +497,19 @@ const PipelineUI = {
     },
 
     // ── Pipeline Stats ─────────────────────────────────────────────
-    renderPipelineStats(schedule, pipelineConfig) {
+    formatBytes(bytes) {
+        if (bytes == null || Number.isNaN(Number(bytes))) return "—";
+        const units = ["B", "KB", "MB", "GB", "TB"];
+        let value = Number(bytes);
+        let unit = 0;
+        while (value >= 1024 && unit < units.length - 1) {
+            value /= 1024;
+            unit += 1;
+        }
+        return `${value.toFixed(unit === 0 ? 0 : 2)} ${units[unit]}`;
+    },
+
+    renderPipelineStats(schedule, pipelineConfig, memoryBreakdown) {
         const container = document.getElementById("pipeline-stats-content");
         if (!container || !schedule) return;
 
@@ -511,10 +523,13 @@ const PipelineUI = {
             ["Total Block", schedule.total_cycles_per_block + " cycles"],
             ["Bottleneck", schedule.bottleneck_stage],
         ];
-
-        if (pipelineConfig) {
-            rows.push(["Async Copy", pipelineConfig.async_copy_enabled ? "ON" : "OFF"]);
-            rows.push(["2:4 Sparsity", pipelineConfig.sparsity_2_4_enabled ? "ON" : "OFF"]);
+        if (memoryBreakdown) {
+            rows.push(
+                ["Effective HBM Read", this.formatBytes(memoryBreakdown.effective_hbm_read_bytes)],
+                ["CTA Logical Read", this.formatBytes(memoryBreakdown.logical_cta_read_bytes)],
+                ["Unique Tensor Read", this.formatBytes(memoryBreakdown.unique_tensor_read_bytes)],
+                ["L2 Reuse", `${Number(memoryBreakdown.l2_reuse_factor || 1).toFixed(2)}x`],
+            );
         }
 
         container.innerHTML = rows.map(([label, value]) =>
@@ -527,10 +542,15 @@ const PipelineUI = {
         const container = document.getElementById("tiling-info-content");
         if (!container || !tilingInfo) return;
 
+        // Sync tile input fields with actual values from analysis
+        const blockM = document.getElementById("block-m-input");
+        const blockN = document.getElementById("block-n-input");
+        const blockK = document.getElementById("block-k-input");
+        if (blockM) { blockM.value = tilingInfo.block_m; blockM.placeholder = tilingInfo.block_m; }
+        if (blockN) { blockN.value = tilingInfo.block_n; blockN.placeholder = tilingInfo.block_n; }
+        if (blockK) { blockK.value = tilingInfo.block_k; blockK.placeholder = tilingInfo.block_k; }
+
         const rows = [
-            ["Block M", tilingInfo.block_m],
-            ["Block N", tilingInfo.block_n],
-            ["Block K", tilingInfo.block_k],
             ["Warps/Block", tilingInfo.num_warps_per_block],
             ["Shared Mem", tilingInfo.shared_memory_per_block != null
                 ? (tilingInfo.shared_memory_per_block / 1024).toFixed(1) + " KB"
@@ -540,6 +560,98 @@ const PipelineUI = {
         container.innerHTML = rows.map(([label, value]) =>
             `<div class="spec-row"><span class="spec-label">${label}</span><span class="spec-value mono">${value}</span></div>`
         ).join("");
+    },
+
+    // ── Performance Guidance ───────────────────────────────────────
+    renderRecommendations(result) {
+        let container = document.getElementById("pipeline-recommendations-content");
+        if (!container) {
+            const pipelineResults = document.getElementById("pipeline-results");
+            if (!pipelineResults) return;
+            const card = document.createElement("div");
+            card.className = "card";
+            card.id = "pipeline-recommendations-card";
+            card.innerHTML = `
+                <h2>Performance Guidance</h2>
+                <div id="pipeline-recommendations-content"></div>
+            `;
+            const ganttCard = document.getElementById("gantt-chart-container")?.closest(".card");
+            pipelineResults.insertBefore(card, ganttCard || null);
+            container = document.getElementById("pipeline-recommendations-content");
+        }
+        if (!container || !result.pipeline_schedule || !result.tiling_info) return;
+
+        const schedule = result.pipeline_schedule;
+        const tiling = result.tiling_info;
+        const memory = result.pipeline_memory_breakdown || {};
+        const bottleneck = result.bottleneck || schedule.bottleneck_stage || "";
+        const tips = [];
+
+        if (bottleneck.includes("async_copy") || bottleneck.includes("global_read")) {
+            tips.push({
+                title: "Memory load is limiting throughput",
+                text: `HBM guidance is based on effective HBM traffic after L2 reuse. Try increasing Block K from ${tiling.block_k} to improve arithmetic work per global-memory load. If shared memory becomes too high, reduce Block M or Block N first.`,
+            });
+            if (memory.l2_reuse_factor && memory.l2_reuse_factor > 1.2) {
+                tips.push({
+                    title: "L2 reuse is reducing HBM pressure",
+                    text: `CTA logical reads are about ${Number(memory.l2_reuse_factor).toFixed(2)}x higher than effective HBM reads. Changing Block M/N can alter this reuse pattern.`,
+                });
+            }
+            tips.push({
+                title: "Keep async copy enabled",
+                text: "Async copy overlaps global-memory movement with compute; disabling it will usually make a memory-bound schedule slower.",
+            });
+        } else if (bottleneck.includes("shared_load")) {
+            tips.push({
+                title: "Shared-memory feed is the bottleneck",
+                text: `Try smaller Block K or a more balanced M/N tile. Current tile is ${tiling.block_m}x${tiling.block_n}x${tiling.block_k}.`,
+            });
+        } else if (bottleneck.includes("mma") || bottleneck.includes("fma_alu")) {
+            tips.push({
+                title: "Compute is limiting throughput",
+                text: "Larger Block M/N can improve reuse and occupancy tradeoffs, but if wave count rises or shared memory pressure grows, step back to the previous tile.",
+            });
+            if (result.pipeline_config && !result.pipeline_config.sparsity_2_4_enabled) {
+                tips.push({
+                    title: "Check sparse eligibility",
+                    text: "If weights are compatible with 2:4 sparsity, enabling it can reduce MMA cycles in the pipeline model.",
+                });
+            }
+        } else if (bottleneck.includes("store") || bottleneck.includes("write")) {
+            tips.push({
+                title: "Epilogue/writeback is visible",
+                text: "Try increasing Block K so more compute is done per output tile write, or reduce Block M/N if the output tile is too large.",
+            });
+        }
+
+        if (schedule.wave_count > 1) {
+            tips.push({
+                title: "There are multiple CTA waves",
+                text: `Wave count is ${schedule.wave_count}. Smaller Block M/N can increase grid parallelism balance, while larger tiles may reduce wave count but increase per-block time.`,
+            });
+        }
+
+        if (tiling.shared_memory_per_block > 0) {
+            tips.push({
+                title: "Shared memory budget",
+                text: `Current tile uses ${(tiling.shared_memory_per_block / 1024).toFixed(1)} KB per block. Leave headroom for occupancy when increasing Block K.`,
+            });
+        }
+
+        if (tips.length === 0) {
+            tips.push({
+                title: "No single dominant adjustment",
+                text: "Try one tile dimension at a time and compare SOL time, bottleneck stage, wave count, and shared memory per block.",
+            });
+        }
+
+        container.innerHTML = tips.map(t => `
+            <div class="recommendation-item">
+                <div class="recommendation-title">${t.title}</div>
+                <div class="recommendation-text">${t.text}</div>
+            </div>
+        `).join("");
     },
 
     // ── Stage Breakdown Table ──────────────────────────────────────
@@ -631,8 +743,9 @@ const PipelineUI = {
         }
 
         this.showPipelineResults();
-        this.renderPipelineStats(result.pipeline_schedule, result.pipeline_config);
+        this.renderPipelineStats(result.pipeline_schedule, result.pipeline_config, result.pipeline_memory_breakdown);
         this.renderTilingInfo(result.tiling_info);
+        this.renderRecommendations(result);
         this.renderGanttChart(result.pipeline_schedule);
         this.renderStageBreakdown(result.stage_breakdown, result.pipeline_schedule);
     },

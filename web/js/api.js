@@ -32,6 +32,12 @@ const API = {
     /** Fetch full comparison overview of all hardware targets. */
     getHardwareOverview() { return this._get("/hardware/overview"); },
 
+    /** Fetch pipeline tile granularity constraints. */
+    getTileConstraints(operator, hardware, dtype) {
+        const qs = new URLSearchParams({ operator, hardware, dtype });
+        return this._get(`/tile-constraints?${qs.toString()}`);
+    },
+
     /** Run a SOL analysis. */
     analyze(operator, hardware, dtype, mode, dims, pipelineConfig) {
         const body = { operator, hardware, dtype, mode, dims };

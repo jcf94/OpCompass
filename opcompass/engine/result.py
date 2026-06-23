@@ -49,7 +49,10 @@ def _result_to_dict(result: AnalysisResult) -> dict:
         "sol_tflops": result.sol_tflops,
         "bottleneck": result.bottleneck,
         "stage_breakdown": result.stage_breakdown,
+        "roofline_data": result.roofline_data,
     }
+    if result.pipeline_memory_breakdown:
+        d["pipeline_memory_breakdown"] = result.pipeline_memory_breakdown
 
     # Pipeline-specific fields
     if result.pipeline_schedule is not None:
@@ -94,6 +97,9 @@ def _result_to_dict(result: AnalysisResult) -> dict:
         d["pipeline_config"] = {
             "async_copy_enabled": pc.async_copy_enabled,
             "sparsity_2_4_enabled": pc.sparsity_2_4_enabled,
+            "block_m": pc.block_m,
+            "block_n": pc.block_n,
+            "block_k": pc.block_k,
         }
 
     # Solar-specific fields
@@ -143,9 +149,9 @@ def _format_table(result: AnalysisResult) -> str:
     write = f"{result.total_write_bytes / 1e9:.2f} GB"
     sol_us = result.sol_time_s * 1e6
 
-    # In pipeline mode, the Read/Compute/Write figures are stage busy-times
-    # (Σ sub-op durations × waves). They are NOT additive to SOL — pipeline
-    # stages overlap (e.g. mma[k] runs concurrently with async_copy_load[k+1]).
+    # In pipeline mode, the Read/Compute/Write figures are non-additive:
+    # pipeline stages overlap, and resident CTAs share the same SM pipeline
+    # throughput rather than multiplying it.
     # For non-pipeline modes the figures follow max() or sum() semantics
     # depending on hardware.can_overlap_with_compute.
     is_pipeline = result.pipeline_schedule is not None
@@ -172,7 +178,7 @@ def _format_table(result: AnalysisResult) -> str:
         f"  ★ Bottleneck : {result.bottleneck}",
     ]
     if is_pipeline:
-        lines.append("  Note: Read/Compute/Write above are stage busy-times (non-additive: stages overlap)")
+        lines.append("  Note: Read/Compute/Write above are non-additive because pipeline stages overlap")
     lines.append("═" * 65)
 
     # Add pipeline-specific info
@@ -197,9 +203,21 @@ def _format_table(result: AnalysisResult) -> str:
             "─" * 65,
             f"  Total cycles/block : {ps.total_cycles_per_block:,}",
             f"  Grid size          : {ps.grid_size} blocks",
-            f"  Wave count         : {ps.wave_count}  (ceil(grid / SMs))",
+            f"  Wave count         : {ps.wave_count}  (ceil(grid / resident CTAs))",
             f"  K iterations       : {ps.num_k_iterations}  (ceil(K / block_K))",
             f"  Bottleneck stage   : {ps.bottleneck_stage}",
+        ]
+        memory = result.pipeline_memory_breakdown
+        if memory:
+            lines += [
+                "",
+                "  Pipeline Memory:",
+                f"    Effective HBM read     : {memory.get('effective_hbm_read_bytes', 0) / 1e9:.3f} GB",
+                f"    CTA logical read       : {memory.get('logical_cta_read_bytes', 0) / 1e9:.3f} GB",
+                f"    Unique tensor read     : {memory.get('unique_tensor_read_bytes', 0) / 1e9:.3f} GB",
+                f"    L2 reuse factor        : {memory.get('l2_reuse_factor', 1):.2f}x",
+            ]
+        lines += [
             "",
             f"  Stage Cycle Breakdown:",
         ]

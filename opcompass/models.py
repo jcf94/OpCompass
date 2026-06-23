@@ -118,6 +118,9 @@ class PipelineConfig:
 
     async_copy_enabled: bool = True       # Use async_copy_load vs global_read path
     sparsity_2_4_enabled: bool = False    # 2:4 structured sparsity doubles MMA throughput
+    block_m: int | None = None            # Optional user-selected CTA tile M
+    block_n: int | None = None            # Optional user-selected CTA tile N
+    block_k: int | None = None            # Optional user-selected CTA tile K
 
 
 @dataclass
@@ -126,8 +129,10 @@ class SubOp:
 
     name: str                       # e.g., "load_A_tile", "mma", "store_C"
     flops: int = 0                  # FLOPs in this sub-op
-    read_bytes: int = 0             # Bytes read from memory hierarchy
-    write_bytes: int = 0            # Bytes written
+    read_bytes: int = 0             # Logical CTA bytes read by this sub-op
+    write_bytes: int = 0            # Logical CTA bytes written by this sub-op
+    effective_hbm_read_bytes: float | None = None   # HBM bytes after cache reuse
+    effective_hbm_write_bytes: float | None = None  # HBM bytes after cache reuse
     depends_on: list[str] = field(default_factory=list)  # Names of sub-ops this depends on
     pipeline_stage: str = ""        # Explicit mapping to PipelineStage.name
     is_recurring: bool = False      # True if this sub-op repeats per K-slice iteration
@@ -253,6 +258,7 @@ class AnalysisResult:
     pipeline_schedule: PipelineSchedule | None = None
     pipeline_config: PipelineConfig | None = None
     tiling_info: TilingInfo | None = None
+    pipeline_memory_breakdown: dict[str, float] = field(default_factory=dict)
 
     # ——— solar-specific results (None for non-solar modes) ———
     solar_data: SolarAnalysisData | None = None

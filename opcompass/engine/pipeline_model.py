@@ -49,6 +49,7 @@ def schedule_pipeline(
 
     # ── Build stage map ────────────────────────────────────────────────
     stage_map: dict[str, object] = {s.name: s for s in cu.pipeline}
+    dtype = dims.get("dtype")
 
     # ── Separate recurring vs epilogue sub-ops ─────────────────────────
     recurring = [s for s in sub_ops if s.is_recurring]
@@ -68,7 +69,7 @@ def schedule_pipeline(
     #     Adding latency per-iteration was the main source of error: with
     #     async_copy_load latency=300 and 128 K-iterations, the old code
     #     charged 300*2*128 = 76,800 cycles of latency alone.
-    def _work_units(sub: SubOp, stage) -> float:
+    def _logical_work_units(sub: SubOp, stage) -> float:
         """Compute the work units (bytes or FMA) for a sub-op on a stage."""
         stage_name_lower = stage.name.lower()
         if any(kw in stage_name_lower for kw in ("read", "load", "write", "store", "copy")):
@@ -78,6 +79,40 @@ def schedule_pipeline(
             # So work = flops / 2 to get FMA count
             return sub.flops / 2 if sub.flops > 0 else 0
         return sub.read_bytes + sub.write_bytes + sub.flops
+
+    def _effective_hbm_work_units(sub: SubOp) -> float:
+        """Return HBM bytes for global/async stages, defaulting to logical bytes."""
+        read_bytes = (
+            sub.effective_hbm_read_bytes
+            if sub.effective_hbm_read_bytes is not None
+            else sub.read_bytes
+        )
+        write_bytes = (
+            sub.effective_hbm_write_bytes
+            if sub.effective_hbm_write_bytes is not None
+            else sub.write_bytes
+        )
+        return read_bytes + write_bytes
+
+    def _stage_throughput(sub: SubOp, stage) -> float:
+        """Return effective per-SM throughput for this sub-op and dtype."""
+        throughput = stage.throughput_per_cycle
+        stage_name = stage.name.lower()
+
+        if any(kw in stage_name for kw in ("mma", "alu", "compute")):
+            peak = hardware.get_peak_flops(dtype) if dtype is not None else 0.0
+            if peak > 0 and cu.clock_mhz > 0 and cu.count > 0:
+                throughput = peak / (2 * cu.clock_mhz * 1e6 * cu.count)
+
+        if pipeline_config.sparsity_2_4_enabled and "mma" in stage_name:
+            throughput *= 2
+
+        return throughput
+
+    def _hbm_bytes_per_cycle_per_sm() -> float:
+        if hardware.hbm_bandwidth <= 0 or cu.clock_mhz <= 0 or cu.count <= 0:
+            return 0.0
+        return hardware.hbm_bandwidth / (cu.clock_mhz * 1e6) / cu.count
 
     def _throughput_duration(sub: SubOp) -> int:
         """Throughput-only duration (no latency) — for steady-state iterations."""
@@ -91,14 +126,20 @@ def schedule_pipeline(
                 return math.ceil(sub.flops / (peak / (cu.clock_mhz * 1e6)))
             return 0
 
-        throughput = stage.throughput_per_cycle
-        if pipeline_config.sparsity_2_4_enabled and "mma" in stage.name.lower():
-            throughput *= 2
-
-        work = _work_units(sub, stage)
-        if throughput <= 0 or work <= 0:
+        throughput = _stage_throughput(sub, stage)
+        logical_work = _logical_work_units(sub, stage)
+        if throughput <= 0 or logical_work <= 0:
             return 0
-        return math.ceil(work / throughput)
+        local_cycles = math.ceil(logical_work / throughput)
+
+        stage_name = stage.name.lower()
+        if any(kw in stage_name for kw in ("global", "async_copy")):
+            hbm_throughput = _hbm_bytes_per_cycle_per_sm()
+            hbm_work = _effective_hbm_work_units(sub)
+            if hbm_throughput > 0 and hbm_work > 0:
+                return max(local_cycles, math.ceil(hbm_work / hbm_throughput))
+
+        return local_cycles
 
     def _full_duration(sub: SubOp) -> int:
         """Full duration: latency + throughput — for prologue/epilogue."""
@@ -135,16 +176,51 @@ def schedule_pipeline(
     M = dims.get("M", 0)
     N = dims.get("N", 0)
     grid_size = max(1, math.ceil(M / tiling.block_m)) * max(1, math.ceil(N / tiling.block_n))
-    wave_count = max(1, math.ceil(grid_size / cu.count))
+
+    threads_per_block = max(1, tiling.num_warps_per_block * cu.threads_per_warp)
+    blocks_by_threads = (
+        cu.max_threads_per_unit // threads_per_block
+        if cu.max_threads_per_unit > 0 else cu.max_thread_blocks_per_unit
+    )
+    blocks_by_warps = (
+        cu.max_concurrent_warps // tiling.num_warps_per_block
+        if cu.max_concurrent_warps > 0 and tiling.num_warps_per_block > 0
+        else cu.max_thread_blocks_per_unit
+    )
+    blocks_by_smem = (
+        (cu.shared_memory_max_kb * 1024) // tiling.shared_memory_per_block
+        if cu.shared_memory_max_kb > 0 and tiling.shared_memory_per_block > 0
+        else cu.max_thread_blocks_per_unit
+    )
+    resident_blocks_per_sm = max(
+        1,
+        min(
+            x for x in (
+                cu.max_thread_blocks_per_unit,
+                blocks_by_threads,
+                blocks_by_warps,
+                blocks_by_smem,
+            )
+            if x and x > 0
+        ),
+    )
+    blocks_per_sm = max(1, math.ceil(grid_size / cu.count)) if cu.count > 0 else grid_size
+    wave_count = max(1, math.ceil(grid_size / (cu.count * resident_blocks_per_sm)))
 
     clock_s = 1.0 / (cu.clock_mhz * 1e6) if cu.clock_mhz > 0 else 0.0
-    total_time_s = total_cycles * clock_s * wave_count
 
     # Identify bottleneck stage
     stage_times: dict[str, int] = {}
     for s in scheduled:
         stage_times[s.pipeline_stage] = stage_times.get(s.pipeline_stage, 0) + s.duration_cycles
     bottleneck = max(stage_times, key=stage_times.get) if stage_times else ""
+
+    # ``total_cycles`` is the critical-path time for one CTA using a full SM
+    # pipeline. Resident CTAs improve latency hiding, but they do not multiply
+    # the SM's MMA, async-copy, or load/store throughput. Estimate chip time by
+    # charging each SM for the CTA stage work it must actually issue.
+    resource_cycles = max(stage_times.values(), default=0) * blocks_per_sm
+    total_time_s = max(total_cycles, resource_cycles) * clock_s
 
     # Compute per-iteration, prologue, and epilogue cycles
     # Use full durations (with latency) for prologue/epilogue since these

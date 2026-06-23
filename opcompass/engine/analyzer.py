@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -123,7 +124,9 @@ class Analyzer:
             pipeline_config = PipelineConfig()
 
         # Get tiling strategy
-        tiling = operator.get_tiling_strategy(hardware, dtype, **dims)
+        tiling = operator.get_tiling_strategy(
+            hardware, dtype, pipeline_config=pipeline_config, **dims
+        )
 
         # Get sub-op decomposition
         sub_ops = operator.get_ops_breakdown(dtype, hardware, pipeline_config, **dims)
@@ -154,29 +157,33 @@ class Analyzer:
             )
 
         # Schedule pipeline
-        schedule = schedule_pipeline(sub_ops, hardware, pipeline_config, tiling, **dims)
+        schedule = schedule_pipeline(
+            sub_ops, hardware, pipeline_config, tiling, dtype=dtype, **dims
+        )
 
         # Derive ALL metrics from pipeline schedule for consistency
         total_flops = operator.compute_flops(**dims)
         read_bytes, write_bytes = operator.compute_io_bytes(dtype, **dims)
         clock_s = 1.0 / (hardware.compute_unit.clock_mhz * 1e6)
-        wave_count = schedule.wave_count
+        blocks_per_sm = (
+            max(1, math.ceil(schedule.grid_size / hardware.compute_unit.count))
+            if hardware.compute_unit.count > 0 else schedule.grid_size
+        )
 
         # Per-stage busy time. These are "stage occupied" times — the sum of
-        # each sub-op's duration within one block. They are NOT additive to
-        # SOL because pipeline stages overlap (e.g. mma runs concurrently
-        # with async_copy_load of the next iteration). We scale by wave_count
-        # so the breakdown is on the same scale as SOL_time (which already
-        # includes wave_count via schedule.total_time_s).
+        # each sub-op's duration for the CTA work each SM must issue. They are
+        # NOT additive to SOL because pipeline stages overlap (e.g. mma runs
+        # concurrently with async_copy_load of the next iteration). Resident
+        # CTAs hide latency but still share the same SM pipeline throughput.
         stage_breakdown = {}
         for sop in schedule.sub_ops:
             stage = sop.pipeline_stage
-            stage_breakdown[stage] = stage_breakdown.get(stage, 0) + sop.duration_cycles * clock_s * wave_count
+            stage_breakdown[stage] = stage_breakdown.get(stage, 0) + sop.duration_cycles * clock_s * blocks_per_sm
 
         # Consolidate pipeline stages → read / compute / write
-        _read_stages = {"async_copy_load", "global_read", "shared_load"}
+        _read_stages = {"async_copy_load", "global_read", "shared_load", "tmem_load"}
         _compute_stages = {"mma", "fma_alu"}
-        _write_stages = {"shared_store", "global_write"}
+        _write_stages = {"shared_store", "global_write", "async_copy_store"}
 
         mem_read_time = sum(
             t for stage, t in stage_breakdown.items()
@@ -191,15 +198,21 @@ class Analyzer:
             if stage in _write_stages
         )
 
-        sol_time = schedule.total_time_s
-        sol_tflops = (total_flops / sol_time / 1e12) if sol_time > 0 else float("inf")
-
         # Roofline data from pipeline model rather than simple model
         peak_flops = hardware.get_peak_flops(dtype)
+        if pipeline_config.sparsity_2_4_enabled and dtype.value in {"fp16", "bf16", "tf32", "fp8", "int8"}:
+            peak_flops *= 2
         peak_bw = hardware.hbm_bandwidth
         total_io = read_bytes + write_bytes
         oi = (total_flops / total_io) if total_io > 0 else float("inf")
         achievable = min(peak_flops, oi * peak_bw)
+        # The pipeline scheduler is the source of truth in pipeline mode.
+        # Roofline values are still returned for chart context, not as a cap.
+        sol_time = schedule.total_time_s
+        sol_tflops = (total_flops / sol_time / 1e12) if sol_time > 0 else float("inf")
+        pipeline_memory_breakdown = self._build_pipeline_memory_breakdown(
+            sub_ops, schedule, read_bytes, write_bytes
+        )
 
         return AnalysisResult(
             operator=operator.name,
@@ -230,6 +243,7 @@ class Analyzer:
             pipeline_schedule=schedule,
             pipeline_config=pipeline_config,
             tiling_info=tiling,
+            pipeline_memory_breakdown=pipeline_memory_breakdown,
         )
 
     # ------------------------------------------------------------------
@@ -261,6 +275,65 @@ class Analyzer:
 
         utilization = 1.0
         return flops / (peak * utilization)
+
+    def _build_pipeline_memory_breakdown(
+        self,
+        sub_ops,
+        schedule,
+        unique_tensor_read_bytes: int,
+        unique_tensor_write_bytes: int,
+    ) -> dict[str, float]:
+        """Separate CTA-local movement from HBM traffic after cache reuse."""
+        grid_size = schedule.grid_size
+        recurring_multiplier = schedule.num_k_iterations
+
+        logical_cta_read = 0.0
+        logical_cta_write = 0.0
+        logical_hbm_read = 0.0
+        logical_hbm_write = 0.0
+        effective_hbm_read = 0.0
+        effective_hbm_write = 0.0
+
+        for sub in sub_ops:
+            multiplier = recurring_multiplier if sub.is_recurring else 1
+            scale = multiplier * grid_size
+            logical_cta_read += sub.read_bytes * scale
+            logical_cta_write += sub.write_bytes * scale
+
+            stage = sub.pipeline_stage.lower()
+            if "global" in stage or "async_copy" in stage:
+                logical_hbm_read += sub.read_bytes * scale
+                logical_hbm_write += sub.write_bytes * scale
+                effective_read = (
+                    sub.effective_hbm_read_bytes
+                    if sub.effective_hbm_read_bytes is not None
+                    else sub.read_bytes
+                )
+                effective_write = (
+                    sub.effective_hbm_write_bytes
+                    if sub.effective_hbm_write_bytes is not None
+                    else sub.write_bytes
+                )
+                effective_hbm_read += effective_read * scale
+                effective_hbm_write += effective_write * scale
+
+        l2_reuse_factor = (
+            logical_hbm_read / effective_hbm_read
+            if effective_hbm_read > 0
+            else 1.0
+        )
+
+        return {
+            "logical_cta_read_bytes": logical_cta_read,
+            "logical_cta_write_bytes": logical_cta_write,
+            "logical_hbm_read_bytes": logical_hbm_read,
+            "logical_hbm_write_bytes": logical_hbm_write,
+            "effective_hbm_read_bytes": effective_hbm_read,
+            "effective_hbm_write_bytes": effective_hbm_write,
+            "unique_tensor_read_bytes": float(unique_tensor_read_bytes),
+            "unique_tensor_write_bytes": float(unique_tensor_write_bytes),
+            "l2_reuse_factor": l2_reuse_factor,
+        }
 
     def _build_stage_breakdown(
         self, read_bytes, write_bytes, flops, hardware, dtype

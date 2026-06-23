@@ -1,6 +1,9 @@
 """Test pipeline analysis — DAG scheduling, overlap, and wave quantization."""
 
+from pathlib import Path
+
 import pytest
+import yaml
 from opcompass.registry import get_operator, get_hardware
 from opcompass.models import DataType, AnalysisMode, PipelineConfig
 from opcompass.engine.analyzer import Analyzer
@@ -37,6 +40,13 @@ def test_matmul_a100_pipeline_async_on():
 
     # Async overlap: per-iter should be less than prologue
     assert ps.per_iteration_cycles < ps.prologue_cycles
+
+    memory = result.pipeline_memory_breakdown
+    assert memory["effective_hbm_read_bytes"] < memory["logical_hbm_read_bytes"]
+    assert memory["effective_hbm_read_bytes"] < memory["logical_cta_read_bytes"]
+    assert memory["effective_hbm_read_bytes"] == pytest.approx(result.total_read_bytes)
+    assert memory["l2_reuse_factor"] == pytest.approx(32.0)
+    assert result.sol_tflops > 100
 
 
 def test_matmul_a100_pipeline_async_off():
@@ -83,12 +93,13 @@ def test_matmul_a100_pipeline_sparsity():
         pipeline_config=config_sparsity, M=4096, N=4096, K=4096,
     )
 
-    # Sparsity should reduce total time (shorter mma throughput in steady state)
-    assert result_sp.sol_time_s < result_no.sol_time_s
+    # Sparsity reduces MMA work. If another stage is the bottleneck, the total
+    # SOL time may stay flat, but the compute stage itself must get shorter.
+    assert result_sp.compute_time_s < result_no.compute_time_s
 
     # With async overlap: per_iter = max(load_tp + shared_tp, mma_tp).
-    # Sparsity doubles mma throughput, so per_iteration_cycles decreases
-    # when mma was the bottleneck (which it is for this fp16 matmul).
+    # Sparsity doubles MMA throughput, so per_iteration_cycles decreases only
+    # when MMA controls the steady-state advance.
     assert result_sp.pipeline_schedule.total_cycles_per_block < result_no.pipeline_schedule.total_cycles_per_block
 
 
@@ -103,6 +114,116 @@ def test_pipeline_tiling_a100():
     assert tiling.block_n == 128
     assert tiling.block_k == 32
     assert tiling.num_warps_per_block == 4
+
+
+def test_pipeline_tiling_custom_blocks():
+    """Pipeline config should override matmul block M/N/K."""
+    op = get_operator("matmul")()
+    hw = get_hardware("a100")()
+    config = PipelineConfig(
+        async_copy_enabled=True,
+        block_m=64,
+        block_n=128,
+        block_k=16,
+    )
+
+    analyzer = Analyzer()
+    result = analyzer.analyze(
+        op, hw, DataType.FP16, mode=AnalysisMode.PIPELINE,
+        pipeline_config=config, M=4096, N=4096, K=4096,
+    )
+
+    assert result.tiling_info is not None
+    assert result.tiling_info.block_m == 64
+    assert result.tiling_info.block_n == 128
+    assert result.tiling_info.block_k == 16
+
+
+def test_pipeline_tiling_custom_blocks_validate_shared_memory():
+    """Oversized custom tiles should fail clearly instead of being silently shrunk."""
+    op = get_operator("matmul")()
+    hw = get_hardware("a100")()
+    config = PipelineConfig(
+        async_copy_enabled=True,
+        block_m=512,
+        block_n=512,
+        block_k=128,
+    )
+
+    analyzer = Analyzer()
+    with pytest.raises(ValueError, match="exceeding"):
+        analyzer.analyze(
+            op, hw, DataType.FP16, mode=AnalysisMode.PIPELINE,
+            pipeline_config=config, M=4096, N=4096, K=4096,
+        )
+
+
+def test_pipeline_tiling_custom_blocks_validate_instruction_granularity():
+    """Custom tiles must match the hardware instruction tile granularity."""
+    op = get_operator("matmul")()
+    hw = get_hardware("a100")()
+    config = PipelineConfig(
+        async_copy_enabled=True,
+        block_m=63,
+        block_n=64,
+        block_k=16,
+    )
+
+    analyzer = Analyzer()
+    with pytest.raises(ValueError, match="multiple of 16"):
+        analyzer.analyze(
+            op, hw, DataType.FP16, mode=AnalysisMode.PIPELINE,
+            pipeline_config=config, M=4096, N=4096, K=4096,
+        )
+
+
+def test_pipeline_compute_time_accounts_for_sm_resource_sharing():
+    """Resident CTAs should share SM MMA throughput, not multiply it."""
+    op = get_operator("matmul")()
+    hw = get_hardware("a100")()
+    config = PipelineConfig(
+        async_copy_enabled=True,
+        block_m=64,
+        block_n=64,
+        block_k=16,
+    )
+
+    result = Analyzer().analyze(
+        op, hw, DataType.FP16, mode=AnalysisMode.PIPELINE,
+        pipeline_config=config, M=4096, N=4096, K=4096,
+    )
+
+    clock_s = 1.0 / (hw.compute_unit.clock_mhz * 1e6)
+    blocks_per_sm = (result.pipeline_schedule.grid_size + hw.num_compute_units - 1) // hw.num_compute_units
+    mma_cycles_per_cta = sum(
+        s.duration_cycles
+        for s in result.pipeline_schedule.sub_ops
+        if s.pipeline_stage == "mma"
+    )
+    expected_compute_time = mma_cycles_per_cta * blocks_per_sm * clock_s
+
+    assert result.compute_time_s == pytest.approx(expected_compute_time)
+    assert result.stage_breakdown["compute"] == pytest.approx(expected_compute_time)
+
+
+def test_matmul_pipeline_l2_overflow_degrades_toward_logical_hbm_traffic():
+    """When the K-slice panel working set exceeds L2, effective HBM rises."""
+    op = get_operator("matmul")()
+    hw = get_hardware("a100")()
+    config = PipelineConfig(async_copy_enabled=True)
+
+    result = Analyzer().analyze(
+        op, hw, DataType.FP16, mode=AnalysisMode.PIPELINE,
+        pipeline_config=config, M=2**24, N=2**24, K=32,
+    )
+
+    memory = result.pipeline_memory_breakdown
+    logical = memory["logical_hbm_read_bytes"]
+    effective = memory["effective_hbm_read_bytes"]
+    unique = memory["unique_tensor_read_bytes"]
+
+    assert unique < effective < logical
+    assert effective / logical > 0.95
 
 
 def test_pipeline_subops_decomposition():
@@ -137,6 +258,69 @@ def test_pipeline_subops_no_async():
     sub_ops = op.get_ops_breakdown(DataType.FP16, hw, config, M=4096, N=4096, K=4096)
     load_subs = [s for s in sub_ops if "global_read" in s.pipeline_stage]
     assert len(load_subs) == 2  # global_read_A and global_read_B
+
+
+def test_pipeline_fp32_uses_cuda_core_stage():
+    """FP32 matmul should use CUDA-core FMA, not Tensor Core MMA."""
+    op = get_operator("matmul")()
+    hw = get_hardware("a100")()
+    config = PipelineConfig(async_copy_enabled=True)
+
+    sub_ops = op.get_ops_breakdown(DataType.FP32, hw, config, M=4096, N=4096, K=4096)
+    compute_subs = [s for s in sub_ops if s.flops > 0]
+
+    assert len(compute_subs) == 1
+    assert compute_subs[0].pipeline_stage == "fma_alu"
+
+
+def test_pipeline_h100_fp8_faster_than_fp16():
+    """Pipeline compute throughput should follow dtype-specific hardware peaks."""
+    op = get_operator("matmul")()
+    hw = get_hardware("h100")()
+    config = PipelineConfig(async_copy_enabled=True)
+    analyzer = Analyzer()
+
+    result_fp16 = analyzer.analyze(
+        op, hw, DataType.FP16, mode=AnalysisMode.PIPELINE,
+        pipeline_config=config, M=4096, N=4096, K=4096,
+    )
+    result_fp8 = analyzer.analyze(
+        op, hw, DataType.FP8, mode=AnalysisMode.PIPELINE,
+        pipeline_config=config, M=4096, N=4096, K=4096,
+    )
+
+    assert result_fp8.sol_time_s < result_fp16.sol_time_s
+
+
+def test_solar_arch_configs_match_hardware_peaks():
+    """Custom SOLAR MAC/cycle values should match OpCompass hardware peaks."""
+    arch_dir = Path(__file__).resolve().parents[2] / "opcompass" / "configs" / "solar_arch"
+    configs = {
+        "a100": "A100.yaml",
+        "h100": "H100.yaml",
+        "h100_pcie": "H100_PCIe.yaml",
+        "b200": "B200.yaml",
+        "b300": "B300.yaml",
+    }
+    dtype_keys = {
+        DataType.FP32: "MAC_per_cycle_fp32_sm",
+        DataType.TF32: "MAC_per_cycle_tf32_tc",
+        DataType.FP16: "MAC_per_cycle_fp16_tc",
+        DataType.BF16: "MAC_per_cycle_bf16_tc",
+        DataType.FP8: "MAC_per_cycle_fp8_tc",
+        DataType.INT8: "MAC_per_cycle_int8_tc",
+    }
+
+    for hardware_name, config_name in configs.items():
+        hw = get_hardware(hardware_name)()
+        config = yaml.safe_load((arch_dir / config_name).read_text())
+        freq_hz = config["freq_GHz"] * 1e9
+
+        for dtype, key in dtype_keys.items():
+            if dtype not in hw.compute_unit.peak_flops or key not in config:
+                continue
+            expected = hw.compute_unit.peak_flops[dtype] / (2 * freq_hz)
+            assert config[key] == pytest.approx(expected, rel=1e-3)
 
 
 def test_pipeline_mode_fallback():

@@ -6,6 +6,7 @@
 let operators = [];
 let hardware = [];
 let currentResult = null;
+let tileConstraints = null;
 
 // ── DOM refs ──────────────────────────────────────────────────
 const $opSelect = document.getElementById("operator-select");
@@ -18,6 +19,11 @@ const $hwSpec = document.getElementById("hw-spec-content");
 const $pipelineConfig = document.getElementById("pipeline-config");
 const $asyncCopyToggle = document.getElementById("async-copy-toggle");
 const $sparsityToggle = document.getElementById("sparsity-toggle");
+const $blockMInput = document.getElementById("block-m-input");
+const $blockNInput = document.getElementById("block-n-input");
+const $blockKInput = document.getElementById("block-k-input");
+const $tileResetBtn = document.getElementById("tile-reset-btn");
+const $tileConstraintHint = document.getElementById("tile-constraint-hint");
 
 const $solTime = document.getElementById("sol-time");
 const $solTflops = document.getElementById("sol-tflops");
@@ -56,6 +62,7 @@ async function init() {
 
     updateDimInputs();
     updateHardwareInfo();
+    await updateTileConstraints();
 }
 
 // ── Dynamic dimension inputs ──────────────────────────────────
@@ -126,10 +133,12 @@ async function updateHardwareInfo() {
 
 // ── Pipeline config toggle ─────────────────────────────────────
 function togglePipelineConfig() {
-    if ($modeSelect.value === "pipeline") {
-        $pipelineConfig.classList.remove("hidden");
-    } else {
-        $pipelineConfig.classList.add("hidden");
+    if ($pipelineConfig) {
+        if ($modeSelect.value === "pipeline") {
+            $pipelineConfig.classList.remove("hidden");
+        } else {
+            $pipelineConfig.classList.add("hidden");
+        }
     }
     // Toggle solar results visibility
     const $solarResults = document.getElementById("solar-results");
@@ -140,12 +149,132 @@ function togglePipelineConfig() {
     }
 }
 
+async function updateTileConstraints() {
+    if (!$opSelect.value || !$hwSelect.value || !$dtypeSelect.value) return;
+    try {
+        tileConstraints = await API.getTileConstraints(
+            $opSelect.value, $hwSelect.value, $dtypeSelect.value
+        );
+        applyTileInputConstraints();
+    } catch (err) {
+        console.warn("Failed to load tile constraints:", err);
+        tileConstraints = null;
+    }
+}
+
+function applyTileInputConstraints() {
+    const bindings = [
+        [$blockMInput, "block_m"],
+        [$blockNInput, "block_n"],
+        [$blockKInput, "block_k"],
+    ];
+    bindings.forEach(([input, key]) => {
+        if (!input || !tileConstraints || !tileConstraints[key]) return;
+        const rule = tileConstraints[key];
+        input.min = rule.min || rule.multiple_of || 1;
+        input.step = rule.multiple_of || 1;
+        input.placeholder = `auto · ×${rule.multiple_of || 1}`;
+        input.title = `${key.replace("_", " ").toUpperCase()} must be a multiple of ${rule.multiple_of || 1}`;
+    });
+    if ($tileConstraintHint && tileConstraints) {
+        $tileConstraintHint.textContent =
+            `${tileConstraints.instruction || "instruction"} · ` +
+            `M ×${tileConstraints.block_m?.multiple_of || 1}, ` +
+            `N ×${tileConstraints.block_n?.multiple_of || 1}, ` +
+            `K ×${tileConstraints.block_k?.multiple_of || 1}`;
+    }
+}
+
+function getTileRule(key) {
+    return tileConstraints && tileConstraints[key] ? tileConstraints[key] : null;
+}
+
+function isValidTileValue(key, value) {
+    if (value == null) return true;
+    const rule = getTileRule(key);
+    if (!rule) return value > 0;
+    const multiple = rule.multiple_of || 1;
+    const min = rule.min || multiple;
+    return value >= min && value % multiple === 0;
+}
+
+function tileValidationMessage(key) {
+    const rule = getTileRule(key);
+    if (!rule) return "Use a positive integer";
+    const multiple = rule.multiple_of || 1;
+    const min = rule.min || multiple;
+    return `${key.replace("_", " ").toUpperCase()} must be a multiple of ${multiple} and at least ${min}` +
+        (tileConstraints.instruction ? ` (${tileConstraints.instruction})` : "");
+}
+
+function parseTileInput(input) {
+    if (!input || input.value.trim() === "") return null;
+    const value = Number(input.value);
+    if (!Number.isInteger(value) || value <= 0) return NaN;
+    return value;
+}
+
+function normalizeTileInput(input, key) {
+    const value = parseTileInput(input);
+    if (value == null || Number.isNaN(value)) {
+        input.setCustomValidity(value == null ? "" : tileValidationMessage(key));
+        return value == null;
+    }
+    const rule = getTileRule(key);
+    if (!rule) {
+        input.setCustomValidity("");
+        return true;
+    }
+    const multiple = rule.multiple_of || 1;
+    const min = rule.min || multiple;
+    const normalized = Math.max(min, Math.ceil(value / multiple) * multiple);
+    input.value = String(normalized);
+    input.setCustomValidity("");
+    return true;
+}
+
+function updateTileInputValidity(input, key) {
+    const value = parseTileInput(input);
+    if (value == null) {
+        input.setCustomValidity("");
+        return true;
+    }
+    if (Number.isNaN(value) || !isValidTileValue(key, value)) {
+        input.setCustomValidity(tileValidationMessage(key));
+        return false;
+    }
+    input.setCustomValidity("");
+    return true;
+}
+
 function collectPipelineConfig() {
     if ($modeSelect.value !== "pipeline") return null;
-    return {
+    const config = {
         async_copy_enabled: $asyncCopyToggle.checked,
         sparsity_2_4_enabled: $sparsityToggle.checked,
     };
+
+    const parseTile = (input) => {
+        if (!input || input.value.trim() === "") return null;
+        const v = Number(input.value);
+        return Number.isInteger(v) && v > 0 ? v : NaN;
+    };
+    const validateTile = (key, value) => {
+        if (value == null) return;
+        if (Number.isNaN(value) || !isValidTileValue(key, value)) {
+            throw new Error(tileValidationMessage(key));
+        }
+    };
+    const blockM = parseTile($blockMInput);
+    const blockN = parseTile($blockNInput);
+    const blockK = parseTile($blockKInput);
+    validateTile("block_m", blockM);
+    validateTile("block_n", blockN);
+    validateTile("block_k", blockK);
+    if (blockM != null) config.block_m = blockM;
+    if (blockN != null) config.block_n = blockN;
+    if (blockK != null) config.block_k = blockK;
+    return config;
 }
 
 // ── Analyze ────────────────────────────────────────────────────
@@ -166,7 +295,16 @@ async function runAnalysis() {
     const dtype = $dtypeSelect.value;
     const mode = $modeSelect.value;
     const dims = collectDims();
-    const pipelineConfig = collectPipelineConfig();
+    if (mode === "pipeline") {
+        await updateTileConstraints();
+    }
+    let pipelineConfig;
+    try {
+        pipelineConfig = collectPipelineConfig();
+    } catch (err) {
+        alert(err.message);
+        return;
+    }
 
     _analysisInFlight = true;
     $analyzeBtn.textContent = "Analyzing…";
@@ -218,9 +356,17 @@ function renderResults(data) {
     $bottleneckCard.className = "metric-card " + bottleneck;
 
     // Detail table
+    const pipelineMemory = data.pipeline_memory_breakdown || null;
+    const readRows = pipelineMemory ? `
+        <tr><td>Unique Tensor Read</td><td>${formatBytes(data.total_read_bytes)}</td></tr>
+        <tr><td>Effective HBM Read</td><td>${formatBytes(pipelineMemory.effective_hbm_read_bytes)}</td></tr>
+        <tr><td>CTA Logical Read</td><td>${formatBytes(pipelineMemory.logical_cta_read_bytes)}</td></tr>
+    ` : `
+        <tr><td>Read Bytes</td><td>${formatBytes(data.total_read_bytes)}</td></tr>
+    `;
     $detailTable.innerHTML = `
         <tr><td>Total FLOPs</td><td>${formatFlops(data.total_flops)}</td></tr>
-        <tr><td>Read Bytes</td><td>${formatBytes(data.total_read_bytes)}</td></tr>
+        ${readRows}
         <tr><td>Write Bytes</td><td>${formatBytes(data.total_write_bytes)}</td></tr>
         <tr><td>Memory Read Time</td><td>${data.memory_read_time_us.toFixed(1)} µs</td></tr>
         <tr><td>Compute Time</td><td>${data.compute_time_us.toFixed(1)} µs</td></tr>
@@ -232,21 +378,34 @@ function renderResults(data) {
     // Charts — need to reconstruct roofline data
     renderBreakdownChart(data);
 
-    const peakFlops = data.sol_tflops * 1e12;
-    const peakBw = data.sol_time_us > 0 && data.memory_read_time_us > 0
-        ? data.total_read_bytes / data.memory_read_time_us * 1e6
-        : 2e12;
+    const rooflineCard = document.getElementById("roofline-card");
+    const detailTableCard = document.getElementById("detail-table-container");
+    const cardRow = document.querySelector("#results-panel > .card-row");
 
-    const totalIo = data.total_read_bytes + data.total_write_bytes;
-    const oi = totalIo > 0 ? data.total_flops / totalIo : 1000;
-    const achievable = Math.min(peakFlops, oi * peakBw);
+    if (data.mode === "pipeline") {
+        rooflineCard?.classList.add("hidden");
+        if (detailTableCard && cardRow && detailTableCard.parentElement !== cardRow) {
+            cardRow.appendChild(detailTableCard);
+        }
+    } else {
+        rooflineCard?.classList.remove("hidden");
+        if (detailTableCard && cardRow && detailTableCard.parentElement === cardRow) {
+            cardRow.parentNode.insertBefore(detailTableCard, cardRow.nextSibling);
+        }
+        const totalIo = data.total_read_bytes + data.total_write_bytes;
+        const oi = totalIo > 0 ? data.total_flops / totalIo : 1000;
+        const rooflineData = data.roofline_data || {};
+        const peakFlops = rooflineData.peak_flops || data.sol_tflops * 1e12;
+        const peakBw = rooflineData.peak_bandwidth || 2e12;
+        const achievable = rooflineData.achievable_flops || Math.min(peakFlops, oi * peakBw);
 
-    renderRooflineChart({
-        operational_intensity: oi,
-        peak_flops: peakFlops,
-        peak_bandwidth: peakBw,
-        achievable_flops: achievable,
-    }, data);
+        renderRooflineChart({
+            operational_intensity: rooflineData.operational_intensity || oi,
+            peak_flops: peakFlops,
+            peak_bandwidth: peakBw,
+            achievable_flops: achievable,
+        }, data);
+    }
 
     // Solar-specific rendering
     if (data.solar_data) {
@@ -296,6 +455,12 @@ function renderSolarResults(sd) {
 }
 
 function renderSolarRuntimeChart(sd) {
+    if (typeof CHARTS_AVAILABLE === "undefined" || !CHARTS_AVAILABLE) {
+        if (typeof renderChartUnavailable === "function") {
+            renderChartUnavailable("solar-runtime-chart");
+        }
+        return;
+    }
     const canvas = document.getElementById("solar-runtime-chart");
     if (!canvas) return;
     // Destroy previous chart instance stored on the element
@@ -347,6 +512,12 @@ function renderSolarRuntimeChart(sd) {
 }
 
 function renderSolarMemoryChart(sd) {
+    if (typeof CHARTS_AVAILABLE === "undefined" || !CHARTS_AVAILABLE) {
+        if (typeof renderChartUnavailable === "function") {
+            renderChartUnavailable("solar-memory-chart");
+        }
+        return;
+    }
     const canvas = document.getElementById("solar-memory-chart");
     if (!canvas) return;
     if (canvas._chart) canvas._chart.destroy();
@@ -425,13 +596,18 @@ $tabBtns.forEach(btn => {
 // Select changes → update UI + immediate re-analysis
 $opSelect.addEventListener("change", () => {
     updateDimInputs();
+    updateTileConstraints();
     triggerAnalysis(true);
 });
 $hwSelect.addEventListener("change", () => {
     updateHardwareInfo();
+    updateTileConstraints();
     triggerAnalysis(true);
 });
-$dtypeSelect.addEventListener("change", () => triggerAnalysis(true));
+$dtypeSelect.addEventListener("change", () => {
+    updateTileConstraints();
+    triggerAnalysis(true);
+});
 $modeSelect.addEventListener("change", () => {
     togglePipelineConfig();
     triggerAnalysis(true);
@@ -440,6 +616,30 @@ $modeSelect.addEventListener("change", () => {
 // Pipeline toggles → immediate re-analysis (only relevant in pipeline mode)
 $asyncCopyToggle.addEventListener("change", () => triggerAnalysis(true));
 $sparsityToggle.addEventListener("change", () => triggerAnalysis(true));
+[
+    [$blockMInput, "block_m"],
+    [$blockNInput, "block_n"],
+    [$blockKInput, "block_k"],
+].forEach(([input, key]) => {
+    input.addEventListener("input", () => {
+        if (updateTileInputValidity(input, key)) {
+            triggerAnalysis(false);
+        }
+    });
+    input.addEventListener("change", () => {
+        if (normalizeTileInput(input, key)) {
+            triggerAnalysis(true);
+        }
+    });
+});
+$tileResetBtn.addEventListener("click", () => {
+    $blockMInput.value = "";
+    $blockNInput.value = "";
+    $blockKInput.value = "";
+    // Reset placeholder to auto hint; renderTilingInfo will update after analysis
+    applyTileInputConstraints();
+    triggerAnalysis(true);
+});
 
 // Manual rerun button
 $analyzeBtn.addEventListener("click", () => {

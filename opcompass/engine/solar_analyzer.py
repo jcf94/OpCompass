@@ -78,14 +78,19 @@ HARDWARE_TO_SOLAR_ARCH: Dict[str, str] = {
     "a100": str(_SOLAR_ARCH_DIR / "A100.yaml"),
     "h100": str(_SOLAR_ARCH_DIR / "H100.yaml"),
     "h100_pcie": str(_SOLAR_ARCH_DIR / "H100_PCIe.yaml"),
+    "b200": str(_SOLAR_ARCH_DIR / "B200.yaml"),
+    "b300": str(_SOLAR_ARCH_DIR / "B300.yaml"),
+    "gb200": str(_SOLAR_ARCH_DIR / "B200.yaml"),  # Same GPU die as B200
+    "gb300": str(_SOLAR_ARCH_DIR / "B300.yaml"),  # Same GPU die as B300
 }
 
-# Add the built-in SOLAR arch configs for hardware we don't have custom configs for
+# Add the built-in SOLAR arch configs for hardware we don't have custom configs for.
+# Use setdefault so our explicit OpCompass configs (if any) take priority.
 _SOLAR_BUILTIN = _SOLAR_ROOT / "configs" / "arch"
 for _name in ["A6000", "B200", "Jetson_Thor_T5000"]:
     _cfg = _SOLAR_BUILTIN / f"{_name}.yaml"
     if _cfg.exists():
-        HARDWARE_TO_SOLAR_ARCH[_name.lower()] = str(_cfg)
+        HARDWARE_TO_SOLAR_ARCH.setdefault(_name.lower(), str(_cfg))
 
 # H100_PCIe also available from SOLAR builtin
 if (_SOLAR_BUILTIN / "H100_PCIe.yaml").exists():

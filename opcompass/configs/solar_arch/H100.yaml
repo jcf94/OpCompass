@@ -6,9 +6,9 @@ SRAM_byte_per_cycle: 10000  # ~20 TB/s L2 aggregate bandwidth
 DRAM_capacity: 85899345920  # 80 GB HBM3
 DRAM_byte_per_cycle: 1691.9  # 3.35 TB/s at 1.98 GHz base clock
 freq_GHz: 1.98
-MAC_per_cycle_fp32_sm: 30303  # 60 TFLOPS FP32 (CUDA cores)
-MAC_per_cycle_fp16_tc: 499697  # 989.4 TFLOPS FP16 (Tensor Cores)
-MAC_per_cycle_bf16_tc: 499697  # 989.4 TFLOPS BF16 (Tensor Cores)
-MAC_per_cycle_tf32_tc: 249848  # 494.7 TFLOPS TF32 (Tensor Cores)
-MAC_per_cycle_fp8_tc: 499697  # 989.4 TFLOPS FP8 (Tensor Cores)
-MAC_per_cycle_int8_tc: 499697  # 989.4 TOPS INT8 (Tensor Cores)
+MAC_per_cycle_fp32_sm: 16894  # 66.9 TFLOPS FP32 (CUDA cores) — MAC = 2 FLOPs
+MAC_per_cycle_fp16_tc: 249848  # 989.4 TFLOPS FP16 (Tensor Cores) — MAC = 2 FLOPs
+MAC_per_cycle_bf16_tc: 249848  # 989.4 TFLOPS BF16 (Tensor Cores) — MAC = 2 FLOPs
+MAC_per_cycle_tf32_tc: 124924  # 494.7 TFLOPS TF32 (Tensor Cores) — MAC = 2 FLOPs
+MAC_per_cycle_fp8_tc: 499722  # 1978.9 TFLOPS FP8 (Tensor Cores) — MAC = 2 FLOPs
+MAC_per_cycle_int8_tc: 499722  # 1978.9 TOPS INT8 (Tensor Cores) — MAC = 2 OPs
