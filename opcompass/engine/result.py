@@ -197,7 +197,7 @@ def _format_table(result: AnalysisResult) -> str:
             "─" * 65,
             f"  Total cycles/block : {ps.total_cycles_per_block:,}",
             f"  Grid size          : {ps.grid_size} blocks",
-            f"  Wave count         : {ps.wave_count}  (ceil(grid / SMs))",
+            f"  Wave count         : {ps.wave_count}  (ceil(grid / resident CTAs))",
             f"  K iterations       : {ps.num_k_iterations}  (ceil(K / block_K))",
             f"  Bottleneck stage   : {ps.bottleneck_stage}",
             "",

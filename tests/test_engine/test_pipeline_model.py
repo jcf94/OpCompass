@@ -1,6 +1,9 @@
 """Test pipeline analysis — DAG scheduling, overlap, and wave quantization."""
 
+from pathlib import Path
+
 import pytest
+import yaml
 from opcompass.registry import get_operator, get_hardware
 from opcompass.models import DataType, AnalysisMode, PipelineConfig
 from opcompass.engine.analyzer import Analyzer
@@ -137,6 +140,69 @@ def test_pipeline_subops_no_async():
     sub_ops = op.get_ops_breakdown(DataType.FP16, hw, config, M=4096, N=4096, K=4096)
     load_subs = [s for s in sub_ops if "global_read" in s.pipeline_stage]
     assert len(load_subs) == 2  # global_read_A and global_read_B
+
+
+def test_pipeline_fp32_uses_cuda_core_stage():
+    """FP32 matmul should use CUDA-core FMA, not Tensor Core MMA."""
+    op = get_operator("matmul")()
+    hw = get_hardware("a100")()
+    config = PipelineConfig(async_copy_enabled=True)
+
+    sub_ops = op.get_ops_breakdown(DataType.FP32, hw, config, M=4096, N=4096, K=4096)
+    compute_subs = [s for s in sub_ops if s.flops > 0]
+
+    assert len(compute_subs) == 1
+    assert compute_subs[0].pipeline_stage == "fma_alu"
+
+
+def test_pipeline_h100_fp8_faster_than_fp16():
+    """Pipeline compute throughput should follow dtype-specific hardware peaks."""
+    op = get_operator("matmul")()
+    hw = get_hardware("h100")()
+    config = PipelineConfig(async_copy_enabled=True)
+    analyzer = Analyzer()
+
+    result_fp16 = analyzer.analyze(
+        op, hw, DataType.FP16, mode=AnalysisMode.PIPELINE,
+        pipeline_config=config, M=4096, N=4096, K=4096,
+    )
+    result_fp8 = analyzer.analyze(
+        op, hw, DataType.FP8, mode=AnalysisMode.PIPELINE,
+        pipeline_config=config, M=4096, N=4096, K=4096,
+    )
+
+    assert result_fp8.sol_time_s < result_fp16.sol_time_s
+
+
+def test_solar_arch_configs_match_hardware_peaks():
+    """Custom SOLAR MAC/cycle values should match OpCompass hardware peaks."""
+    arch_dir = Path(__file__).resolve().parents[2] / "opcompass" / "configs" / "solar_arch"
+    configs = {
+        "a100": "A100.yaml",
+        "h100": "H100.yaml",
+        "h100_pcie": "H100_PCIe.yaml",
+        "b200": "B200.yaml",
+        "b300": "B300.yaml",
+    }
+    dtype_keys = {
+        DataType.FP32: "MAC_per_cycle_fp32_sm",
+        DataType.TF32: "MAC_per_cycle_tf32_tc",
+        DataType.FP16: "MAC_per_cycle_fp16_tc",
+        DataType.BF16: "MAC_per_cycle_bf16_tc",
+        DataType.FP8: "MAC_per_cycle_fp8_tc",
+        DataType.INT8: "MAC_per_cycle_int8_tc",
+    }
+
+    for hardware_name, config_name in configs.items():
+        hw = get_hardware(hardware_name)()
+        config = yaml.safe_load((arch_dir / config_name).read_text())
+        freq_hz = config["freq_GHz"] * 1e9
+
+        for dtype, key in dtype_keys.items():
+            if dtype not in hw.compute_unit.peak_flops or key not in config:
+                continue
+            expected = hw.compute_unit.peak_flops[dtype] / (2 * freq_hz)
+            assert config[key] == pytest.approx(expected, rel=1e-3)
 
 
 def test_pipeline_mode_fallback():

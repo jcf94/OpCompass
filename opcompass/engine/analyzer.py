@@ -154,7 +154,9 @@ class Analyzer:
             )
 
         # Schedule pipeline
-        schedule = schedule_pipeline(sub_ops, hardware, pipeline_config, tiling, **dims)
+        schedule = schedule_pipeline(
+            sub_ops, hardware, pipeline_config, tiling, dtype=dtype, **dims
+        )
 
         # Derive ALL metrics from pipeline schedule for consistency
         total_flops = operator.compute_flops(**dims)

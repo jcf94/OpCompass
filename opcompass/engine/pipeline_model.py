@@ -49,6 +49,7 @@ def schedule_pipeline(
 
     # ── Build stage map ────────────────────────────────────────────────
     stage_map: dict[str, object] = {s.name: s for s in cu.pipeline}
+    dtype = dims.get("dtype")
 
     # ── Separate recurring vs epilogue sub-ops ─────────────────────────
     recurring = [s for s in sub_ops if s.is_recurring]
@@ -79,6 +80,28 @@ def schedule_pipeline(
             return sub.flops / 2 if sub.flops > 0 else 0
         return sub.read_bytes + sub.write_bytes + sub.flops
 
+    def _stage_throughput(sub: SubOp, stage) -> float:
+        """Return effective per-SM throughput for this sub-op and dtype."""
+        throughput = stage.throughput_per_cycle
+        stage_name = stage.name.lower()
+
+        if any(kw in stage_name for kw in ("global", "async_copy")):
+            if hardware.hbm_bandwidth > 0 and cu.clock_mhz > 0 and cu.count > 0:
+                hbm_bytes_per_cycle_per_sm = (
+                    hardware.hbm_bandwidth / (cu.clock_mhz * 1e6) / cu.count
+                )
+                throughput = min(throughput, hbm_bytes_per_cycle_per_sm)
+
+        if any(kw in stage_name for kw in ("mma", "alu", "compute")):
+            peak = hardware.get_peak_flops(dtype) if dtype is not None else 0.0
+            if peak > 0 and cu.clock_mhz > 0 and cu.count > 0:
+                throughput = peak / (2 * cu.clock_mhz * 1e6 * cu.count)
+
+        if pipeline_config.sparsity_2_4_enabled and "mma" in stage_name:
+            throughput *= 2
+
+        return throughput
+
     def _throughput_duration(sub: SubOp) -> int:
         """Throughput-only duration (no latency) — for steady-state iterations."""
         stage = stage_map.get(sub.pipeline_stage)
@@ -91,10 +114,7 @@ def schedule_pipeline(
                 return math.ceil(sub.flops / (peak / (cu.clock_mhz * 1e6)))
             return 0
 
-        throughput = stage.throughput_per_cycle
-        if pipeline_config.sparsity_2_4_enabled and "mma" in stage.name.lower():
-            throughput *= 2
-
+        throughput = _stage_throughput(sub, stage)
         work = _work_units(sub, stage)
         if throughput <= 0 or work <= 0:
             return 0
@@ -135,7 +155,35 @@ def schedule_pipeline(
     M = dims.get("M", 0)
     N = dims.get("N", 0)
     grid_size = max(1, math.ceil(M / tiling.block_m)) * max(1, math.ceil(N / tiling.block_n))
-    wave_count = max(1, math.ceil(grid_size / cu.count))
+
+    threads_per_block = max(1, tiling.num_warps_per_block * cu.threads_per_warp)
+    blocks_by_threads = (
+        cu.max_threads_per_unit // threads_per_block
+        if cu.max_threads_per_unit > 0 else cu.max_thread_blocks_per_unit
+    )
+    blocks_by_warps = (
+        cu.max_concurrent_warps // tiling.num_warps_per_block
+        if cu.max_concurrent_warps > 0 and tiling.num_warps_per_block > 0
+        else cu.max_thread_blocks_per_unit
+    )
+    blocks_by_smem = (
+        (cu.shared_memory_max_kb * 1024) // tiling.shared_memory_per_block
+        if cu.shared_memory_max_kb > 0 and tiling.shared_memory_per_block > 0
+        else cu.max_thread_blocks_per_unit
+    )
+    resident_blocks_per_sm = max(
+        1,
+        min(
+            x for x in (
+                cu.max_thread_blocks_per_unit,
+                blocks_by_threads,
+                blocks_by_warps,
+                blocks_by_smem,
+            )
+            if x and x > 0
+        ),
+    )
+    wave_count = max(1, math.ceil(grid_size / (cu.count * resident_blocks_per_sm)))
 
     clock_s = 1.0 / (cu.clock_mhz * 1e6) if cu.clock_mhz > 0 else 0.0
     total_time_s = total_cycles * clock_s * wave_count

@@ -199,6 +199,8 @@ def get_inputs():
         load_a_name = "async_copy_load_A" if async_on else "global_read_A"
         load_b_name = "async_copy_load_B" if async_on else "global_read_B"
 
+        compute_stage = "fma_alu" if dtype in (DataType.FP32, DataType.FP64) else "mma"
+
         # Per-iteration recurring sub-ops
         sub_ops = [
             SubOp(
@@ -230,8 +232,8 @@ def get_inputs():
                 is_recurring=True,
             ),
             SubOp(
-                name="mma",
-                pipeline_stage="mma",
+                name=compute_stage,
+                pipeline_stage=compute_stage,
                 flops=2 * bM * bN * bK,
                 depends_on=["shared_load_A", "shared_load_B"],
                 is_recurring=True,
