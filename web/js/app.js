@@ -131,6 +131,13 @@ function togglePipelineConfig() {
     } else {
         $pipelineConfig.classList.add("hidden");
     }
+    // Toggle solar results visibility
+    const $solarResults = document.getElementById("solar-results");
+    if ($modeSelect.value === "solar") {
+        $solarResults.classList.remove("hidden");
+    } else {
+        $solarResults.classList.add("hidden");
+    }
 }
 
 function collectPipelineConfig() {
@@ -142,7 +149,18 @@ function collectPipelineConfig() {
 }
 
 // ── Analyze ────────────────────────────────────────────────────
+let _analysisPending = false;
+let _analysisDebounceTimer = null;
+let _analysisInFlight = false;
+
 async function runAnalysis() {
+    if (_analysisInFlight) {
+        // If already running, mark pending and return — the running
+        // one will re-trigger when it finishes.
+        _analysisPending = true;
+        return;
+    }
+
     const opName = $opSelect.value;
     const hwName = $hwSelect.value;
     const dtype = $dtypeSelect.value;
@@ -150,6 +168,7 @@ async function runAnalysis() {
     const dims = collectDims();
     const pipelineConfig = collectPipelineConfig();
 
+    _analysisInFlight = true;
     $analyzeBtn.textContent = "Analyzing…";
     $analyzeBtn.disabled = true;
 
@@ -161,8 +180,31 @@ async function runAnalysis() {
         console.error("Analysis failed:", err);
         alert("Analysis failed: " + err.message);
     } finally {
-        $analyzeBtn.textContent = "Run Analysis";
+        $analyzeBtn.textContent = "Rerun Analysis";
         $analyzeBtn.disabled = false;
+        _analysisInFlight = false;
+
+        // If a change arrived while we were computing, re-run now
+        if (_analysisPending) {
+            _analysisPending = false;
+            runAnalysis();
+        }
+    }
+}
+
+/** Debounced trigger — fires on every change, but waits 400ms of
+ *  inactivity (or immediate for select changes). */
+function triggerAnalysis(immediate) {
+    if (immediate) {
+        if (_analysisDebounceTimer) clearTimeout(_analysisDebounceTimer);
+        _analysisPending = false;
+        runAnalysis();
+    } else {
+        if (_analysisDebounceTimer) clearTimeout(_analysisDebounceTimer);
+        _analysisDebounceTimer = setTimeout(() => {
+            _analysisPending = false;
+            runAnalysis();
+        }, 400);
     }
 }
 
@@ -206,10 +248,136 @@ function renderResults(data) {
         achievable_flops: achievable,
     }, data);
 
+    // Solar-specific rendering
+    if (data.solar_data) {
+        renderSolarResults(data.solar_data);
+    }
+
     // Pipeline-specific rendering
     if (typeof PipelineUI !== "undefined") {
         PipelineUI.render(data);
     }
+}
+
+function renderSolarResults(sd) {
+    // Show solar results section
+    const $solarResults = document.getElementById("solar-results");
+    $solarResults.classList.remove("hidden");
+
+    // Performance models table
+    const $perfTbody = document.getElementById("solar-perf-table").querySelector("tbody");
+    const models = [
+        { label: "Unfused", m: sd.unfused },
+        { label: "Fused", m: sd.fused },
+        { label: "Fused+Prefetched ★", m: sd.fused_prefetched },
+    ];
+    $perfTbody.innerHTML = models.map(({ label, m }) => `
+        <tr>
+            <td>${label}</td>
+            <td>${m.runtime_ms.toFixed(4)}</td>
+            <td>${m.bottleneck}</td>
+            <td>${m.arithmetic_intensity.toFixed(1)}</td>
+            <td>${(m.memory_bytes / 1e9).toFixed(4)}</td>
+        </tr>
+    `).join("");
+
+    // Speedup table
+    const $speedTbody = document.getElementById("solar-speedup-table").querySelector("tbody");
+    $speedTbody.innerHTML = `
+        <tr><td>Fused vs Unfused</td><td>${sd.speedup.fused_vs_unfused.toFixed(2)}×</td></tr>
+        <tr><td>Fused+Prefetched vs Unfused</td><td>${sd.speedup.fused_prefetched_vs_unfused.toFixed(2)}×</td></tr>
+    `;
+
+    // Runtime bar chart
+    renderSolarRuntimeChart(sd);
+
+    // Memory pie/doughnut chart
+    renderSolarMemoryChart(sd);
+}
+
+function renderSolarRuntimeChart(sd) {
+    const canvas = document.getElementById("solar-runtime-chart");
+    if (!canvas) return;
+    // Destroy previous chart instance stored on the element
+    if (canvas._chart) canvas._chart.destroy();
+
+    canvas._chart = new Chart(canvas.getContext("2d"), {
+        type: "bar",
+        data: {
+            labels: ["Unfused", "Fused", "Fused+Prefetched"],
+            datasets: [{
+                label: "Runtime (ms)",
+                data: [sd.unfused.runtime_ms, sd.fused.runtime_ms, sd.fused_prefetched.runtime_ms],
+                backgroundColor: [C.memoryBg, C.successBg, C.computeBg],
+                borderColor: [C.memory, C.success, C.compute],
+                borderWidth: 1.5,
+                borderRadius: 4,
+                barThickness: 28,
+            }],
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+            },
+            scales: {
+                y: {
+                    title: {
+                        display: true, text: "Runtime (ms)",
+                        color: C.muted,
+                        font: { family: "'JetBrains Mono', monospace", size: 10 },
+                    },
+                    ticks: {
+                        color: C.dim,
+                        font: { family: "'JetBrains Mono', monospace", size: 10 },
+                    },
+                    grid: { color: C.gridLight },
+                },
+                x: {
+                    ticks: {
+                        color: C.muted,
+                        font: { family: "'Inter', sans-serif", size: 11 },
+                    },
+                    grid: { display: false },
+                },
+            },
+        },
+    });
+}
+
+function renderSolarMemoryChart(sd) {
+    const canvas = document.getElementById("solar-memory-chart");
+    if (!canvas) return;
+    if (canvas._chart) canvas._chart.destroy();
+
+    const mb = sd.memory_breakdown;
+    canvas._chart = new Chart(canvas.getContext("2d"), {
+        type: "doughnut",
+        data: {
+            labels: ["Weights", "Model I/O", "Intermediate"],
+            datasets: [{
+                data: [mb.weight_bytes, mb.model_io_bytes, mb.intermediate_bytes],
+                backgroundColor: [C.computeBg, C.memoryBg, C.successBg],
+                borderColor: [C.compute, C.memory, C.success],
+                borderWidth: 1.5,
+            }],
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: "bottom",
+                    labels: {
+                        color: C.muted,
+                        padding: 12,
+                        font: { family: "'Inter', sans-serif", size: 10 },
+                    },
+                },
+            },
+        },
+    });
 }
 
 // ── Helpers ────────────────────────────────────────────────────
@@ -253,11 +421,45 @@ $tabBtns.forEach(btn => {
 });
 
 // ── Event listeners ────────────────────────────────────────────
-$opSelect.addEventListener("change", updateDimInputs);
-$hwSelect.addEventListener("change", updateHardwareInfo);
-$modeSelect.addEventListener("change", togglePipelineConfig);
-$analyzeBtn.addEventListener("click", runAnalysis);
+
+// Select changes → update UI + immediate re-analysis
+$opSelect.addEventListener("change", () => {
+    updateDimInputs();
+    triggerAnalysis(true);
+});
+$hwSelect.addEventListener("change", () => {
+    updateHardwareInfo();
+    triggerAnalysis(true);
+});
+$dtypeSelect.addEventListener("change", () => triggerAnalysis(true));
+$modeSelect.addEventListener("change", () => {
+    togglePipelineConfig();
+    triggerAnalysis(true);
+});
+
+// Pipeline toggles → immediate re-analysis (only relevant in pipeline mode)
+$asyncCopyToggle.addEventListener("change", () => triggerAnalysis(true));
+$sparsityToggle.addEventListener("change", () => triggerAnalysis(true));
+
+// Manual rerun button
+$analyzeBtn.addEventListener("click", () => {
+    _analysisPending = false;
+    if (_analysisDebounceTimer) clearTimeout(_analysisDebounceTimer);
+    runAnalysis();
+});
+
+// Dimension inputs → debounced re-analysis (avoid flooding on keystrokes)
+$dimInputs.addEventListener("input", (e) => {
+    if (e.target.tagName === "INPUT") {
+        triggerAnalysis(false);
+    }
+});
 
 // ── Boot ──────────────────────────────────────────────────────
-init();
-togglePipelineConfig();
+async function boot() {
+    await init();
+    togglePipelineConfig();
+    // Run initial analysis with defaults
+    runAnalysis();
+}
+boot();

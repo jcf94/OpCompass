@@ -51,6 +51,7 @@
                 <select id="mode-select">
                     <option value="hierarchy_roofline">Hierarchy Roofline (recommended)</option>
                     <option value="pipeline">Pipeline</option>
+                    <option value="solar">SOLAR (torch graph)</option>
                 </select>
 
                 <div id="pipeline-config" class="pipeline-config-section hidden">
@@ -69,7 +70,7 @@
 
                 <div id="dim-inputs"><!-- dynamic --></div>
 
-                <button id="analyze-btn" class="btn-primary">Run Analysis</button>
+                <button id="analyze-btn" class="btn-primary">Rerun Analysis</button>
             </section>
 
             <section class="card" id="hardware-info">
@@ -110,6 +111,36 @@
             <div class="card" id="detail-table-container">
                 <h2>Detailed Metrics</h2>
                 <table id="detail-table"><tbody></tbody></table>
+            </div>
+
+            <div id="solar-results" class="hidden">
+                <div class="card-row">
+                    <div class="card chart-container">
+                        <h2>SOLAR Roofline — Runtime by Model</h2>
+                        <canvas id="solar-runtime-chart"></canvas>
+                    </div>
+                    <div class="card chart-container">
+                        <h2>SOLAR Memory Breakdown</h2>
+                        <canvas id="solar-memory-chart"></canvas>
+                    </div>
+                </div>
+
+                <div class="card-row solar-stats-row">
+                    <div class="card">
+                        <h2>SOLAR Performance Models</h2>
+                        <table id="solar-perf-table">
+                            <thead><tr><th>Model</th><th>Runtime (ms)</th><th>Bottleneck</th><th>AI (FLOP/B)</th><th>Memory (GB)</th></tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="card">
+                        <h2>Speedup Ratios</h2>
+                        <table id="solar-speedup-table">
+                            <thead><tr><th>Comparison</th><th>Speedup</th></tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
 
             <div id="pipeline-results" class="hidden">
