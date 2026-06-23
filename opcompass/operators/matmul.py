@@ -29,6 +29,12 @@ class Matmul(Operator):
             "K": "Inner dimension (cols of A, rows of B)",
         }
 
+    def compute_torch(self, inputs: List["torch.Tensor"], **kwargs) -> List["torch.Tensor"]:
+        import torch
+
+        A, B = inputs
+        return [torch.matmul(A, B)]
+
     def compute_flops(self, M: int = 0, N: int = 0, K: int = 0, **kwargs) -> int:
         return 2 * M * N * K
 

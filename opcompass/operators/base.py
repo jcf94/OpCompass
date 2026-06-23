@@ -28,6 +28,19 @@ class Operator(ABC):
         return {}
 
     @abstractmethod
+    def compute_torch(self, inputs: list["torch.Tensor"], **kwargs) -> list["torch.Tensor"]:
+        """Compute the operator using PyTorch.
+
+        Args:
+            inputs: List of input tensors.
+            **kwargs: Additional keyword arguments (e.g., dimensions).
+
+        Returns:
+            List of output tensors.
+        """
+        ...
+
+    @abstractmethod
     def compute_flops(self, **dims: int) -> int:
         """Return total floating-point operations for the given concrete dims."""
         ...
