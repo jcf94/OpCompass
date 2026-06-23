@@ -160,11 +160,18 @@ class Analyzer:
         total_flops = operator.compute_flops(**dims)
         read_bytes, write_bytes = operator.compute_io_bytes(dtype, **dims)
         clock_s = 1.0 / (hardware.compute_unit.clock_mhz * 1e6)
+        wave_count = schedule.wave_count
 
+        # Per-stage busy time. These are "stage occupied" times — the sum of
+        # each sub-op's duration within one block. They are NOT additive to
+        # SOL because pipeline stages overlap (e.g. mma runs concurrently
+        # with async_copy_load of the next iteration). We scale by wave_count
+        # so the breakdown is on the same scale as SOL_time (which already
+        # includes wave_count via schedule.total_time_s).
         stage_breakdown = {}
         for sop in schedule.sub_ops:
             stage = sop.pipeline_stage
-            stage_breakdown[stage] = stage_breakdown.get(stage, 0) + sop.duration_cycles * clock_s
+            stage_breakdown[stage] = stage_breakdown.get(stage, 0) + sop.duration_cycles * clock_s * wave_count
 
         # Consolidate pipeline stages → read / compute / write
         _read_stages = {"async_copy_load", "global_read", "shared_load"}

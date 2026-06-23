@@ -455,6 +455,23 @@ $dimInputs.addEventListener("input", (e) => {
     }
 });
 
+// ── Window resize → re-render Gantt chart from cache ─────────
+// The Gantt chart uses canvas with devicePixelRatio scaling; on resize
+// the canvas needs redrawing. We re-render from currentResult cache
+// (no API refetch). Debounced to avoid thrashing.
+let _resizeTimer = null;
+window.addEventListener("resize", () => {
+    if (_resizeTimer) clearTimeout(_resizeTimer);
+    _resizeTimer = setTimeout(() => {
+        if (!currentResult || !currentResult.pipeline_schedule) return;
+        const pipelineEl = document.getElementById("pipeline-results");
+        if (!pipelineEl || pipelineEl.classList.contains("hidden")) return;
+        if (typeof PipelineUI !== "undefined") {
+            PipelineUI.renderGanttChart(currentResult.pipeline_schedule);
+        }
+    }, 150);
+});
+
 // ── Boot ──────────────────────────────────────────────────────
 async function boot() {
     await init();

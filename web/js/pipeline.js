@@ -1,5 +1,15 @@
 /**
  * Pipeline analysis visualization — Gantt chart, stats, and stage breakdown.
+ *
+ * The Gantt chart supports:
+ * - Iteration range selection (toolbar inputs + presets)
+ * - Mouse wheel zoom (centered on cursor)
+ * - Drag to pan
+ * - "Reset Zoom" to fit the visible iteration range
+ *
+ * View state lives in `viewState` and is preserved across re-renders from
+ * the cached `currentResult` in app.js. No API refetch is needed for
+ * view-only changes.
  */
 
 const PipelineUI = {
@@ -15,6 +25,26 @@ const PipelineUI = {
         axisLabel:  "#6f6f6f",
         phaseLabel: "#1b1b1b",
     },
+
+    // ── View state (preserved across re-renders) ──────────────────
+    // iterStart/iterEnd: which K-iterations to render (epilogue always shown)
+    // zoomStart/zoomEnd: visible cycle range; null means auto-fit to visible ops
+    viewState: {
+        iterStart: 0,
+        iterEnd: 8,
+        zoomStart: 0,
+        zoomEnd: null,
+        isDragging: false,
+        dragStartX: 0,
+        dragStartZoomStart: 0,
+        dragStartZoomEnd: 0,
+    },
+
+    // Cached schedule from last render, used by zoom/pan handlers without
+    // requiring app.js to pass it back in.
+    _lastSchedule: null,
+    _lastContainerWidth: 0,
+    _toolbarBound: false,
 
     // ── Stage type classification ──────────────────────────────────
     stageType(name) {
@@ -37,20 +67,59 @@ const PipelineUI = {
         const subOps = schedule.sub_ops;
         if (subOps.length === 0) return;
 
+        // Cache for zoom/pan handlers and resize listener
+        this._lastSchedule = schedule;
+
+        // Clamp iteration range to the actual K-iteration count
+        const numK = schedule.num_k_iterations;
+        if (this.viewState.iterStart >= numK) this.viewState.iterStart = 0;
+        if (this.viewState.iterEnd > numK) this.viewState.iterEnd = numK;
+        if (this.viewState.iterStart >= this.viewState.iterEnd) {
+            this.viewState.iterStart = 0;
+            this.viewState.iterEnd = Math.min(8, numK);
+        }
+
+        // Sync toolbar inputs with current state (in case state changed
+        // programmatically, e.g. preset buttons).
+        this._syncToolbarInputs();
+
+        // Bind toolbar events once
+        if (!this._toolbarBound) {
+            this._bindToolbar();
+            this._toolbarBound = true;
+        }
+
         // Collect unique pipeline stages (y-axis rows)
         const stageSet = new Set();
         subOps.forEach(op => stageSet.add(op.pipeline_stage));
         const stages = Array.from(stageSet).sort((a, b) => {
-            // Sort: memory read stages first, then compute, then write
+            // Sort: memory read stages first, then async, then compute, then write
             const order = { memory: 0, async: 1, compute: 2 };
-            return (order[this.stageType(a)] || 1) - (order[this.stageType(b)] || 1);
+            return (order[this.stageType(a)] ?? 1) - (order[this.stageType(b)] ?? 1);
         });
 
-        // Compute timeline range
-        const maxCycle = Math.max(...subOps.map(op => op.end_cycle));
-        const minCycle = Math.min(...subOps.map(op => op.start_cycle));
+        // Filter to visible iterations.
+        // The epilogue (iteration === -1) sits at the end of the schedule
+        // (cycles ~steadyEnd..total). Only show it when the visible range
+        // includes the last K-iteration, otherwise it would float far away
+        // from early iterations and create a whitespace gap.
+        const includesLastIter = this.viewState.iterEnd >= numK;
+        const visibleOps = subOps.filter(op =>
+            (op.iteration >= this.viewState.iterStart && op.iteration < this.viewState.iterEnd)
+            || (includesLastIter && op.iteration === -1)
+        );
+        if (visibleOps.length === 0) return;
 
-        // Phase boundaries
+        // Visible cycle range (for auto-fit when zoom is null)
+        const visibleMinCycle = Math.min(...visibleOps.map(op => op.start_cycle));
+        const visibleMaxCycle = Math.max(...visibleOps.map(op => op.end_cycle));
+
+        // Resolve zoom range: if null, fit to visible ops
+        const zStart = this.viewState.zoomStart ?? visibleMinCycle;
+        const zEnd = this.viewState.zoomEnd ?? visibleMaxCycle;
+        const zSpan = Math.max(1, zEnd - zStart);
+
+        // Phase boundaries (in cycles, for background shading)
         const prologueEnd = schedule.prologue_cycles;
         const steadyEnd = prologueEnd + schedule.per_iteration_cycles * (schedule.num_k_iterations - 1);
 
@@ -58,6 +127,7 @@ const PipelineUI = {
         const container = document.getElementById("gantt-chart-container");
         const dpr = window.devicePixelRatio || 1;
         const containerWidth = container.clientWidth || 900;
+        this._lastContainerWidth = containerWidth;
         const leftMargin = 140;
         const rightMargin = 20;
         const topMargin = 40;
@@ -76,54 +146,60 @@ const PipelineUI = {
         const ctx = canvas.getContext("2d");
         ctx.scale(dpr, dpr);
 
-        // Scale: cycles -> pixels
+        // Scale: cycles -> pixels, mapping [zStart, zEnd] to chart width
         const cycleScale = (cycle) => {
-            return leftMargin + (cycle / maxCycle) * chartWidth;
+            return leftMargin + ((cycle - zStart) / zSpan) * chartWidth;
         };
 
         // ── Background ──
         ctx.fillStyle = "#ffffff";
         ctx.fillRect(0, 0, containerWidth, totalHeight);
 
-        // ── Phase regions ──
-        // Prologue
-        const prologueX1 = cycleScale(0);
-        const prologueX2 = cycleScale(prologueEnd);
-        ctx.fillStyle = this.colors.prologueBg;
-        ctx.fillRect(prologueX1, topMargin, prologueX2 - prologueX1, chartHeight);
+        // ── Phase regions (clipped to visible range) ──
+        // Only draw a phase band if it intersects [zStart, zEnd].
+        const drawPhaseBand = (start, end, color) => {
+            const x1 = cycleScale(Math.max(start, zStart));
+            const x2 = cycleScale(Math.min(end, zEnd));
+            if (x2 <= x1) return;
+            ctx.fillStyle = color;
+            ctx.fillRect(x1, topMargin, x2 - x1, chartHeight);
+        };
+        drawPhaseBand(0, prologueEnd, this.colors.prologueBg);
+        drawPhaseBand(prologueEnd, steadyEnd, this.colors.steadyBg);
+        drawPhaseBand(steadyEnd, visibleMaxCycle + 1, this.colors.epilogueBg);
 
-        // Steady state
-        ctx.fillStyle = this.colors.steadyBg;
-        ctx.fillRect(prologueX2, topMargin, cycleScale(steadyEnd) - prologueX2, chartHeight);
-
-        // Epilogue
-        ctx.fillStyle = this.colors.epilogueBg;
-        ctx.fillRect(cycleScale(steadyEnd), topMargin, cycleScale(maxCycle) - cycleScale(steadyEnd), chartHeight);
-
-        // ── Phase labels ──
+        // ── Phase labels (only if the phase is visible) ──
         ctx.font = "11px Inter, sans-serif";
         ctx.fillStyle = this.colors.phaseLabel;
         ctx.textAlign = "center";
         const labelY = topMargin - 10;
 
-        ctx.fillText("Prologue", (prologueX1 + prologueX2) / 2, labelY);
-        ctx.fillText("Steady State", (prologueX2 + cycleScale(steadyEnd)) / 2, labelY);
-        ctx.fillText("Epilogue", (cycleScale(steadyEnd) + cycleScale(maxCycle)) / 2, labelY);
+        if (zStart < prologueEnd) {
+            const mid = (Math.max(zStart, 0) + Math.min(zEnd, prologueEnd)) / 2;
+            ctx.fillText("Prologue", cycleScale(mid), labelY);
+        }
+        if (zStart < steadyEnd && zEnd > prologueEnd) {
+            const mid = (Math.max(zStart, prologueEnd) + Math.min(zEnd, steadyEnd)) / 2;
+            ctx.fillText("Steady State", cycleScale(mid), labelY);
+        }
+        if (zEnd > steadyEnd) {
+            const mid = (Math.max(zStart, steadyEnd) + Math.min(zEnd, visibleMaxCycle)) / 2;
+            ctx.fillText("Epilogue", cycleScale(mid), labelY);
+        }
 
         // ── Grid lines ──
         ctx.strokeStyle = this.colors.gridLine;
         ctx.lineWidth = 0.5;
 
-        // Vertical grid: every major cycle milestone
-        const gridCycles = [0, prologueEnd, steadyEnd, maxCycle];
-        // Add intermediate grid lines if chart is wide enough
-        if (chartWidth > 400) {
-            const step = Math.max(1, Math.pow(10, Math.floor(Math.log10(maxCycle / 4))));
-            for (let c = step; c < maxCycle; c += step) {
-                gridCycles.push(c);
-            }
-        }
-        gridCycles.sort((a, b) => a - b);
+        // Vertical grid: choose a "nice" step that yields ~5-10 lines in view
+        const targetLines = 6;
+        const rawStep = zSpan / targetLines;
+        const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)));
+        const step = (rawStep / magnitude < 2 ? 1 : rawStep / magnitude < 5 ? 2 : 5) * magnitude;
+
+        const gridCycles = new Set([zStart, zEnd]);
+        const firstGrid = Math.ceil(zStart / step) * step;
+        for (let c = firstGrid; c < zEnd; c += step) gridCycles.add(c);
 
         for (const cycle of gridCycles) {
             const x = cycleScale(cycle);
@@ -144,19 +220,15 @@ const PipelineUI = {
         }
 
         // ── Sub-op blocks ──
-        // Only render a limited number of iterations for clarity
-        const maxIterations = Math.min(schedule.num_k_iterations, 8);
-        const visibleOps = subOps.filter(op =>
-            op.iteration >= 0 && op.iteration < maxIterations ||
-            op.iteration === -1  // epilogue ops
-        );
-
         for (const op of visibleOps) {
             const stageIdx = stages.indexOf(op.pipeline_stage);
             if (stageIdx === -1) continue;
 
             const x1 = cycleScale(op.start_cycle);
             const x2 = cycleScale(op.end_cycle);
+            // Skip blocks fully outside the view
+            if (x2 < leftMargin || x1 > leftMargin + chartWidth) continue;
+
             const y = topMargin + stageIdx * (rowHeight + rowGap) + 2;
             const w = Math.max(2, x2 - x1);  // minimum 2px width
             const h = rowHeight - 4;
@@ -194,12 +266,234 @@ const PipelineUI = {
 
         for (const cycle of gridCycles) {
             const x = cycleScale(cycle);
-            ctx.fillText(cycle >= 1000 ? (cycle / 1000).toFixed(1) + "k" : String(cycle), x, topMargin + chartHeight + 15);
+            const label = cycle >= 1000 ? (cycle / 1000).toFixed(cycle < 10000 ? 1 : 0) + "k" : String(Math.round(cycle));
+            ctx.fillText(label, x, topMargin + chartHeight + 15);
         }
 
         // ── X-axis title ──
         ctx.font = "11px Inter, sans-serif";
         ctx.fillText("Cycles", leftMargin + chartWidth / 2, totalHeight - 5);
+
+        // ── Mouse interaction (zoom + pan) ──
+        // Bind once; handlers read live state from this.viewState and
+        // this._lastSchedule, so they don't need closure variables.
+        this._bindMouseInteraction(canvas);
+    },
+
+    // ── Toolbar binding ─────────────────────────────────────────────
+    _syncToolbarInputs() {
+        const startInput = document.getElementById("iter-start");
+        const endInput = document.getElementById("iter-end");
+        if (startInput) startInput.value = this.viewState.iterStart;
+        if (endInput) endInput.value = this.viewState.iterEnd;
+    },
+
+    _bindToolbar() {
+        const startInput = document.getElementById("iter-start");
+        const endInput = document.getElementById("iter-end");
+        const resetBtn = document.getElementById("zoom-reset");
+
+        if (startInput) {
+            startInput.addEventListener("change", () => {
+                const v = parseInt(startInput.value, 10);
+                if (!isNaN(v) && v >= 0 && v < this.viewState.iterEnd) {
+                    this.viewState.iterStart = v;
+                    this._resetZoom();
+                    this._redrawFromCache();
+                } else {
+                    startInput.value = this.viewState.iterStart;
+                }
+            });
+        }
+        if (endInput) {
+            endInput.addEventListener("change", () => {
+                const v = parseInt(endInput.value, 10);
+                const numK = this._lastSchedule ? this._lastSchedule.num_k_iterations : 8;
+                if (!isNaN(v) && v > this.viewState.iterStart && v <= numK) {
+                    this.viewState.iterEnd = v;
+                    this._resetZoom();
+                    this._redrawFromCache();
+                } else {
+                    endInput.value = this.viewState.iterEnd;
+                }
+            });
+        }
+
+        // Preset buttons
+        document.querySelectorAll(".btn-mini[data-preset]").forEach(btn => {
+            btn.addEventListener("click", () => {
+                const preset = btn.getAttribute("data-preset");
+                const numK = this._lastSchedule ? this._lastSchedule.num_k_iterations : 8;
+                if (preset === "first8") {
+                    this.viewState.iterStart = 0;
+                    this.viewState.iterEnd = Math.min(8, numK);
+                } else if (preset === "last8") {
+                    this.viewState.iterEnd = numK;
+                    this.viewState.iterStart = Math.max(0, numK - 8);
+                } else if (preset === "all") {
+                    this.viewState.iterStart = 0;
+                    this.viewState.iterEnd = numK;
+                }
+                this._resetZoom();
+                this._syncToolbarInputs();
+                this._redrawFromCache();
+            });
+        });
+
+        if (resetBtn) {
+            resetBtn.addEventListener("click", () => {
+                this._resetZoom();
+                this._redrawFromCache();
+            });
+        }
+    },
+
+    // ── Layout constants (recomputed by handlers, not cached) ──────
+    _getLayout() {
+        const container = document.getElementById("gantt-chart-container");
+        const containerWidth = (container && container.clientWidth) || 900;
+        return {
+            leftMargin: 140,
+            rightMargin: 20,
+            containerWidth,
+            chartWidth: containerWidth - 140 - 20,
+        };
+    },
+
+    // ── Visible ops for current viewState ───────────────────────────
+    // Epilogue (iteration === -1) is only included when the visible range
+    // reaches the last K-iteration — otherwise it would float far away in
+    // cycle space and create a whitespace gap. Must match the filter logic
+    // used in renderGanttChart.
+    _getVisibleOps() {
+        if (!this._lastSchedule) return [];
+        const numK = this._lastSchedule.num_k_iterations;
+        const includesLastIter = this.viewState.iterEnd >= numK;
+        return this._lastSchedule.sub_ops.filter(op =>
+            (op.iteration >= this.viewState.iterStart && op.iteration < this.viewState.iterEnd)
+            || (includesLastIter && op.iteration === -1)
+        );
+    },
+
+    // ── Mouse interaction (wheel zoom + drag pan), bound once ───────
+    _bindMouseInteraction(canvas) {
+        if (canvas._opcompassBound) return;
+        canvas._opcompassBound = true;
+
+        // Convert mouse x (pixels) to cycle, using current viewState
+        const getMouseCycle = (e) => {
+            const ops = this._getVisibleOps();
+            if (ops.length === 0) return 0;
+            const vMin = Math.min(...ops.map(op => op.start_cycle));
+            const vMax = Math.max(...ops.map(op => op.end_cycle));
+            const zStart = this.viewState.zoomStart ?? vMin;
+            const zEnd = this.viewState.zoomEnd ?? vMax;
+            const zSpan = Math.max(1, zEnd - zStart);
+
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const { leftMargin, chartWidth } = this._getLayout();
+            return zStart + ((x - leftMargin) / chartWidth) * zSpan;
+        };
+
+        // ── Wheel zoom ──
+        canvas.addEventListener("wheel", (e) => {
+            e.preventDefault();
+            if (!this._lastSchedule) return;
+
+            const ops = this._getVisibleOps();
+            if (ops.length === 0) return;
+            const vMin = Math.min(...ops.map(op => op.start_cycle));
+            const vMax = Math.max(...ops.map(op => op.end_cycle));
+            let curStart = this.viewState.zoomStart ?? vMin;
+            let curEnd = this.viewState.zoomEnd ?? vMax;
+
+            const mouseCycle = getMouseCycle(e);
+            const factor = e.deltaY < 0 ? 0.8 : 1.25;  // zoom in / out
+            const newSpan = (curEnd - curStart) * factor;
+            // Keep mouseCycle at the same relative position
+            const ratio = (mouseCycle - curStart) / (curEnd - curStart);
+            let newStart = mouseCycle - ratio * newSpan;
+            let newEnd = newStart + newSpan;
+
+            // Clamp to visible range
+            const minSpan = Math.max(1, (vMax - vMin) * 0.02);  // min 2% zoom
+            if (newEnd - newStart < minSpan) {
+                const mid = (newStart + newEnd) / 2;
+                newStart = mid - minSpan / 2;
+                newEnd = mid + minSpan / 2;
+            }
+            if (newStart < vMin) { newEnd += (vMin - newStart); newStart = vMin; }
+            if (newEnd > vMax) { newStart -= (newEnd - vMax); newEnd = vMax; }
+            if (newStart < vMin) newStart = vMin;
+
+            this.viewState.zoomStart = newStart;
+            this.viewState.zoomEnd = newEnd;
+            this._redrawFromCache();
+        }, { passive: false });
+
+        // ── Drag pan ──
+        canvas.addEventListener("mousedown", (e) => {
+            if (!this._lastSchedule) return;
+            const ops = this._getVisibleOps();
+            if (ops.length === 0) return;
+            this.viewState.isDragging = true;
+            this.viewState.dragStartX = e.clientX;
+            // Capture the baseline range at drag start (resolve nulls)
+            const vMin = Math.min(...ops.map(op => op.start_cycle));
+            const vMax = Math.max(...ops.map(op => op.end_cycle));
+            this.viewState.dragStartZoomStart = this.viewState.zoomStart ?? vMin;
+            this.viewState.dragStartZoomEnd = this.viewState.zoomEnd ?? vMax;
+            canvas.classList.add("dragging");
+        });
+
+        canvas.addEventListener("mousemove", (e) => {
+            if (!this.viewState.isDragging || !this._lastSchedule) return;
+
+            const ops = this._getVisibleOps();
+            if (ops.length === 0) return;
+            const vMin = Math.min(...ops.map(op => op.start_cycle));
+            const vMax = Math.max(...ops.map(op => op.end_cycle));
+
+            const startZ = this.viewState.dragStartZoomStart;
+            const endZ = this.viewState.dragStartZoomEnd;
+            const zSpan = endZ - startZ;
+
+            // Pixel delta → cycle delta (inverted: drag right = pan left)
+            const dXPx = e.clientX - this.viewState.dragStartX;
+            const { chartWidth } = this._getLayout();
+            const dCycle = -(dXPx / chartWidth) * zSpan;
+
+            let newStart = startZ + dCycle;
+            let newEnd = endZ + dCycle;
+
+            // Clamp: don't pan beyond visible range
+            if (newStart < vMin) { newEnd += (vMin - newStart); newStart = vMin; }
+            if (newEnd > vMax) { newStart -= (newEnd - vMax); newEnd = vMax; }
+            if (newStart < vMin) newStart = vMin;
+
+            this.viewState.zoomStart = newStart;
+            this.viewState.zoomEnd = newEnd;
+            this._redrawFromCache();
+        });
+
+        const endDrag = () => {
+            this.viewState.isDragging = false;
+            canvas.classList.remove("dragging");
+        };
+        canvas.addEventListener("mouseup", endDrag);
+        canvas.addEventListener("mouseleave", endDrag);
+    },
+
+    _resetZoom() {
+        this.viewState.zoomStart = 0;
+        this.viewState.zoomEnd = null;
+    },
+
+    _redrawFromCache() {
+        if (this._lastSchedule) {
+            this.renderGanttChart(this._lastSchedule);
+        }
     },
 
     // ── Pipeline Stats ─────────────────────────────────────────────
@@ -320,6 +614,20 @@ const PipelineUI = {
         if (!result.pipeline_schedule) {
             this.hidePipelineResults();
             return;
+        }
+
+        // Reset view state on fresh analysis (new schedule, new shape).
+        // Mouse/toolbar handlers stay bound across renders — they read
+        // live state from viewState and _lastSchedule, so no rebind needed.
+        const numK = result.pipeline_schedule.num_k_iterations;
+        this.viewState.iterStart = 0;
+        this.viewState.iterEnd = Math.min(8, numK);
+        this._resetZoom();
+
+        // Bind toolbar once (DOM persists across analyses)
+        if (!this._toolbarBound) {
+            this._bindToolbar();
+            this._toolbarBound = true;
         }
 
         this.showPipelineResults();

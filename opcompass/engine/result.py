@@ -143,6 +143,13 @@ def _format_table(result: AnalysisResult) -> str:
     write = f"{result.total_write_bytes / 1e9:.2f} GB"
     sol_us = result.sol_time_s * 1e6
 
+    # In pipeline mode, the Read/Compute/Write figures are stage busy-times
+    # (Σ sub-op durations × waves). They are NOT additive to SOL — pipeline
+    # stages overlap (e.g. mma[k] runs concurrently with async_copy_load[k+1]).
+    # For non-pipeline modes the figures follow max() or sum() semantics
+    # depending on hardware.can_overlap_with_compute.
+    is_pipeline = result.pipeline_schedule is not None
+
     lines = [
         "═" * 65,
         f"  OpCompass SOL Analysis",
@@ -163,8 +170,10 @@ def _format_table(result: AnalysisResult) -> str:
         "─" * 65,
         f"  ★ SOL time   : {sol_us:8.1f} µs  ({result.sol_tflops:.1f} TFLOPS)",
         f"  ★ Bottleneck : {result.bottleneck}",
-        "═" * 65,
     ]
+    if is_pipeline:
+        lines.append("  Note: Read/Compute/Write above are stage busy-times (non-additive: stages overlap)")
+    lines.append("═" * 65)
 
     # Add pipeline-specific info
     if result.pipeline_schedule is not None:

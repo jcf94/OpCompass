@@ -157,6 +157,23 @@
 
                 <div class="card">
                     <h2>Pipeline Gantt Chart</h2>
+                    <div class="gantt-toolbar">
+                        <div class="gantt-toolbar-group">
+                            <label>Iterations</label>
+                            <input type="number" id="iter-start" min="0" value="0" class="iter-input">
+                            <span class="iter-sep">—</span>
+                            <input type="number" id="iter-end" min="1" value="8" class="iter-input">
+                        </div>
+                        <div class="gantt-toolbar-group">
+                            <button class="btn-mini" data-preset="first8">First 8</button>
+                            <button class="btn-mini" data-preset="last8">Last 8</button>
+                            <button class="btn-mini" data-preset="all">All</button>
+                        </div>
+                        <div class="gantt-toolbar-group">
+                            <button class="btn-mini" id="zoom-reset">Reset Zoom</button>
+                            <span class="gantt-hint">Scroll to zoom · Drag to pan</span>
+                        </div>
+                    </div>
                     <div id="gantt-chart-container">
                         <canvas id="gantt-chart"></canvas>
                     </div>

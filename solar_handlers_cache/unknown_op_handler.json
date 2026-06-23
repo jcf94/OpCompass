@@ -1,0 +1,9 @@
+{
+  "node_type": "unknown_op",
+  "is_generated": true,
+  "metadata": {
+    "source": "generated",
+    "source_code": "def create_custom_op_subgraph(node_id, node_data): return {}"
+  },
+  "code_file": "solar_handlers_cache/unknown_op.py"
+}
