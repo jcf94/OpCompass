@@ -150,18 +150,48 @@ class SolarAnalyzer:
                 arch_path, dtype,
             )
 
-        # Compute fundamental quantities (from operator, for consistency)
-        total_flops = operator.compute_flops(**dims)
-        read_bytes, write_bytes = operator.compute_io_bytes(dtype, **dims)
+        # ── Derive ALL metrics from SOLAR data for consistency ────────
+        # Use the *unfused* model for phase breakdown (each op in isolation,
+        # all tensors from DRAM — closest to the traditional roofline view).
+        # Use *fused_prefetched* for the SOL time (theoretical lower bound).
+        freq_hz = solar_data.arch_freq_ghz * 1e9
 
-        # Map SOLAR's fused_prefetched result (best case) to our SOL time
+        total_flops = solar_data.total_flops
+        # Total DRAM traffic = unfused memory bytes (all inputs+outputs, no fusion)
+        total_io_bytes = solar_data.unfused_memory_bytes
+        # Split read / write proportionally using the operator's own ratio
+        op_read, op_write = operator.compute_io_bytes(dtype, **dims)
+        op_total = op_read + op_write
+        if op_total > 0:
+            read_bytes = int(total_io_bytes * op_read / op_total)
+            write_bytes = int(total_io_bytes * op_write / op_total)
+        else:
+            read_bytes, write_bytes = 0, 0
+
+        # Time derived from SOLAR's cycle counts (unfused model)
+        unfused_compute = solar_data.unfused_compute_cycles
+        unfused_memory_cycles = (solar_data.unfused_memory_bytes /
+                                 solar_data.arch_dram_bw_per_cycle
+                                 if solar_data.arch_dram_bw_per_cycle > 0 else 0)
+
+        compute_time = unfused_compute / freq_hz if freq_hz > 0 else 0.0
+        mem_total_time = unfused_memory_cycles / freq_hz if freq_hz > 0 else 0.0
+        # Split memory time proportionally
+        if op_total > 0:
+            mem_read_time = mem_total_time * op_read / op_total
+            mem_write_time = mem_total_time * op_write / op_total
+        else:
+            mem_read_time, mem_write_time = 0.0, 0.0
+
+        # SOL time from fused_prefetched (best case)
         sol_time_s = solar_data.fused_prefetched_runtime_ms / 1000.0 if solar_data.fused_prefetched_runtime_ms > 0 else 0.0
         sol_tflops = (total_flops / sol_time_s / 1e12) if sol_time_s > 0 else float("inf")
 
-        # Traditional phase times using our own models
-        mem_read_time = self._estimate_memory_time(read_bytes, hardware)
-        compute_time = self._estimate_compute_time(total_flops, hardware, dtype)
-        mem_write_time = self._estimate_memory_time(write_bytes, hardware)
+        # Roofline data also derived from SOLAR
+        peak_flops = solar_data.arch_mac_per_cycle * 2 * freq_hz  # MAC→FLOP, ×freq
+        peak_bw = solar_data.arch_dram_bw_per_cycle * freq_hz
+        operational_intensity = (total_flops / total_io_bytes) if total_io_bytes > 0 else float("inf")
+        achievable = min(peak_flops, operational_intensity * peak_bw)
 
         return AnalysisResult(
             operator=operator.name,
@@ -183,9 +213,12 @@ class SolarAnalyzer:
                 "compute": compute_time,
                 "write": mem_write_time,
             },
-            roofline_data=self._build_roofline_data(
-                total_flops, read_bytes + write_bytes, hardware, dtype
-            ),
+            roofline_data={
+                "operational_intensity": operational_intensity,
+                "peak_flops": peak_flops,
+                "peak_bandwidth": peak_bw,
+                "achievable_flops": achievable,
+            },
             solar_data=solar_data,
         )
 
@@ -342,36 +375,6 @@ class SolarAnalyzer:
             f"Available: {sorted(HARDWARE_TO_SOLAR_ARCH.keys())}. "
             f"Place a YAML config in {_SOLAR_ARCH_DIR}."
         )
-
-    def _estimate_memory_time(self, byte_count: int, hardware: Hardware) -> float:
-        if byte_count <= 0:
-            return 0.0
-        tiers = hardware.memory.tiers
-        if tiers:
-            return tiers[0].transfer_time(byte_count)
-        return 0.0
-
-    def _estimate_compute_time(self, flops: int, hardware: Hardware, dtype) -> float:
-        if flops <= 0:
-            return 0.0
-        peak = hardware.get_peak_flops(dtype)
-        if peak <= 0:
-            return float("inf")
-        return flops / peak
-
-    def _build_roofline_data(
-        self, flops: int, io_bytes: int, hardware: Hardware, dtype
-    ) -> dict:
-        peak_flops = hardware.get_peak_flops(dtype)
-        peak_bw = hardware.hbm_bandwidth
-        operational_intensity = (flops / io_bytes) if io_bytes > 0 else float("inf")
-        achievable_flops = min(peak_flops, operational_intensity * peak_bw)
-        return {
-            "operational_intensity": operational_intensity,
-            "peak_flops": peak_flops,
-            "peak_bandwidth": peak_bw,
-            "achievable_flops": achievable_flops,
-        }
 
 
 # ---------------------------------------------------------------------------

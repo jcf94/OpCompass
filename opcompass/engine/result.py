@@ -169,23 +169,43 @@ def _format_table(result: AnalysisResult) -> str:
     # Add pipeline-specific info
     if result.pipeline_schedule is not None:
         ps = result.pipeline_schedule
+        # Aggregate per-stage cycle counts from scheduled sub-ops
+        stage_cycles: dict[str, int] = {}
+        for sop in ps.sub_ops:
+            stage = sop.pipeline_stage
+            stage_cycles[stage] = stage_cycles.get(stage, 0) + sop.duration_cycles
+
         lines += [
+            "",
+            "═" * 65,
+            "  Pipeline Analysis",
             "─" * 65,
-            "  Pipeline Details:",
-            f"  K iterations      : {ps.num_k_iterations}",
-            f"  Grid size         : {ps.grid_size} blocks",
-            f"  Wave count        : {ps.wave_count}",
-            f"  Prologue cycles   : {ps.prologue_cycles}",
-            f"  Per-iter cycles   : {ps.per_iteration_cycles}",
-            f"  Epilogue cycles   : {ps.epilogue_cycles}",
-            f"  Total cycles/block: {ps.total_cycles_per_block}",
-            f"  Bottleneck stage  : {ps.bottleneck_stage}",
+            f"  {'Phase':<20} {'Cycles':>10}  {'Time':>10}",
+            f"  {'─'*20} {'─'*10}  {'─'*10}",
+            f"  {'Prologue':<20} {ps.prologue_cycles:>10,}  {ps.prologue_cycles * 1e3 / result.compute_unit_clock_hz if hasattr(result, 'compute_unit_clock_hz') else 0:>9.1f} µs",
+            f"  {'Steady state ×' + str(ps.num_k_iterations - 1) if ps.num_k_iterations > 1 else 'Steady state':<20} {ps.per_iteration_cycles * max(0, ps.num_k_iterations - 1):>10,}",
+            f"  {'Epilogue':<20} {ps.epilogue_cycles:>10,}",
+            "─" * 65,
+            f"  Total cycles/block : {ps.total_cycles_per_block:,}",
+            f"  Grid size          : {ps.grid_size} blocks",
+            f"  Wave count         : {ps.wave_count}  (ceil(grid / SMs))",
+            f"  K iterations       : {ps.num_k_iterations}  (ceil(K / block_K))",
+            f"  Bottleneck stage   : {ps.bottleneck_stage}",
+            "",
+            f"  Stage Cycle Breakdown:",
         ]
+
+        # Show per-stage cycle counts sorted by magnitude
+        for stage, cycles in sorted(stage_cycles.items(), key=lambda x: -x[1]):
+            pct = cycles / max(ps.total_cycles_per_block, 1) * 100
+            lines.append(f"    {stage:<25} {cycles:>10,}  ({pct:5.1f}%)")
+
         if result.tiling_info is not None:
             ti = result.tiling_info
             lines += [
+                "",
                 f"  Tiling (bM×bN×bK) : {ti.block_m}×{ti.block_n}×{ti.block_k}",
-                f"  Shared mem/block  : {ti.shared_memory_per_block} bytes",
+                f"  Shared mem/block  : {ti.shared_memory_per_block:,} bytes  ({ti.shared_memory_per_block / 1024:.0f} KB)",
                 f"  Warps/block       : {ti.num_warps_per_block}",
             ]
         if result.pipeline_config is not None:

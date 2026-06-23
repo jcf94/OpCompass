@@ -156,7 +156,7 @@ class Analyzer:
         # Schedule pipeline
         schedule = schedule_pipeline(sub_ops, hardware, pipeline_config, tiling, **dims)
 
-        # Build per-stage breakdown from the schedule
+        # Derive ALL metrics from pipeline schedule for consistency
         total_flops = operator.compute_flops(**dims)
         read_bytes, write_bytes = operator.compute_io_bytes(dtype, **dims)
         clock_s = 1.0 / (hardware.compute_unit.clock_mhz * 1e6)
@@ -166,13 +166,33 @@ class Analyzer:
             stage = sop.pipeline_stage
             stage_breakdown[stage] = stage_breakdown.get(stage, 0) + sop.duration_cycles * clock_s
 
+        # Consolidate pipeline stages → read / compute / write
+        _read_stages = {"async_copy_load", "global_read", "shared_load"}
+        _compute_stages = {"mma", "fma_alu"}
+        _write_stages = {"shared_store", "global_write"}
+
+        mem_read_time = sum(
+            t for stage, t in stage_breakdown.items()
+            if stage in _read_stages
+        )
+        compute_time = sum(
+            t for stage, t in stage_breakdown.items()
+            if stage in _compute_stages
+        )
+        mem_write_time = sum(
+            t for stage, t in stage_breakdown.items()
+            if stage in _write_stages
+        )
+
         sol_time = schedule.total_time_s
         sol_tflops = (total_flops / sol_time / 1e12) if sol_time > 0 else float("inf")
 
-        # Also compute the traditional read/compute/write breakdown
-        mem_read_time = self._estimate_memory_time(read_bytes, hardware)
-        compute_time = self._estimate_compute_time(total_flops, hardware, dtype)
-        mem_write_time = self._estimate_memory_time(write_bytes, hardware)
+        # Roofline data from pipeline model rather than simple model
+        peak_flops = hardware.get_peak_flops(dtype)
+        peak_bw = hardware.hbm_bandwidth
+        total_io = read_bytes + write_bytes
+        oi = (total_flops / total_io) if total_io > 0 else float("inf")
+        achievable = min(peak_flops, oi * peak_bw)
 
         return AnalysisResult(
             operator=operator.name,
@@ -189,10 +209,17 @@ class Analyzer:
             bottleneck=schedule.bottleneck_stage,
             sol_time_s=sol_time,
             sol_tflops=sol_tflops,
-            stage_breakdown=stage_breakdown,
-            roofline_data=self._build_roofline_data(
-                total_flops, read_bytes + write_bytes, hardware, dtype
-            ),
+            stage_breakdown={
+                "read": mem_read_time,
+                "compute": compute_time,
+                "write": mem_write_time,
+            },
+            roofline_data={
+                "operational_intensity": oi,
+                "peak_flops": peak_flops,
+                "peak_bandwidth": peak_bw,
+                "achievable_flops": achievable,
+            },
             pipeline_schedule=schedule,
             pipeline_config=pipeline_config,
             tiling_info=tiling,
