@@ -251,17 +251,29 @@ def schedule_pipeline(
     total_shared_tp = sum(_throughput_duration(s) for s in shared_load_subs)
     total_mma_tp = sum(_throughput_duration(s) for s in mma_subs)
 
-    # Prologue: all sequential (no overlap), latency included
-    prologue_cycles = total_load_full + total_shared_full + total_mma_full
+    prefetch_distance = max(0, tiling.stage_count - 1) if async_can_overlap else 0
+
+    # Prologue: async kernels fill the software-pipeline window before the
+    # first MMA. A 2-stage kernel prefetches only k0, matching the historical
+    # double-buffered behavior; deeper kernels prefetch more K-slices.
+    if async_can_overlap and prefetch_distance > 0:
+        prologue_prefetches = min(prefetch_distance, num_k_iterations)
+        prologue_cycles = (
+            prologue_prefetches * (total_load_full + total_shared_full)
+            + total_mma_full
+        )
+    else:
+        prologue_cycles = total_load_full + total_shared_full + total_mma_full
 
     # Steady state per iteration:
-    # With async copy overlap, load[k] overlaps with mma[k-1]. shared_load[k]
-    # is serial after load[k] (data dependency) but overlaps with mma[k-1].
+    # With async copy overlap, load[k + prefetch_distance] overlaps with
+    # mma[k]. shared_load is serial after its load (data dependency) but
+    # overlaps with earlier MMA work.
     # The per-iteration advance is:
     #   max(load_tp + shared_tp, mma_tp)
     # — the load+shared chain vs. the mma throughput, whichever is longer.
     # Without async overlap, everything is sequential (same as prologue).
-    if async_can_overlap:
+    if async_can_overlap and prefetch_distance > 0:
         per_iteration_cycles = max(total_load_tp + total_shared_tp, total_mma_tp)
     else:
         per_iteration_cycles = total_load_full + total_shared_full + total_mma_full
@@ -291,16 +303,17 @@ def _reschedule_solid(
     """Re-schedule sub-ops using the SOL iteration formula.
 
     Produces a timeline with three phases:
-    - Prologue (k=0): sequential, full durations (latency + throughput)
+    - Prologue: sequential prefetch-window fill plus first MMA, full durations
     - Steady state (k=1..N-1): overlap where applicable, throughput-only
       durations (latency hidden by the pipeline)
     - Epilogue: sequential, full durations
 
     Steady-state overlap model (async copy enabled):
-      load[k] overlaps with mma[k-1] (starts at mma[k-1].start).
-      shared_load[k] is serial after load[k] (data dependency) but overlaps
-      with mma[k-1] (different execution units on Ampere — tensor cores vs.
-      load/store units).
+      load[k + prefetch_distance] overlaps with mma[k], where
+      prefetch_distance = stage_count - 1.
+      shared_load is serial after load (data dependency) but can overlap with
+      MMA for an earlier K-slice (different execution units on Ampere —
+      tensor cores vs. load/store units).
       mma[k] starts after both shared_load[k] and mma[k-1] complete.
 
       Per-iteration advance = max(load_tp + shared_tp, mma_tp)
@@ -334,73 +347,68 @@ def _reschedule_solid(
             iteration=iteration,
         ))
 
-    # ── Prologue (k=0): all sequential, full durations ─────────────────
-    for s in load_subs:
-        dur = full_durations[s.name]
-        _place(s, cycle, dur, 0)
-        cycle += dur
-    for s in shared_load_subs:
-        dur = full_durations[s.name]
-        _place(s, cycle, dur, 0)
-        cycle += dur
-    for s in mma_subs:
-        dur = full_durations[s.name]
-        _place(s, cycle, dur, 0)
-        cycle += dur
+    def _place_prefetch(iteration, start, duration_by_name):
+        sub_cycle = start
+        for s in load_subs:
+            dur = duration_by_name[s.name]
+            _place(s, sub_cycle, dur, iteration)
+            sub_cycle += dur
+        for s in shared_load_subs:
+            dur = duration_by_name[s.name]
+            _place(s, sub_cycle, dur, iteration)
+            sub_cycle += dur
+        return sub_cycle
 
-    prologue_end = cycle
+    def _place_mma(iteration, start, duration_by_name):
+        sub_cycle = start
+        for s in mma_subs:
+            dur = duration_by_name[s.name]
+            _place(s, sub_cycle, dur, iteration)
+            sub_cycle += dur
+        return sub_cycle
 
-    # ── Steady state (k=1..N-1) ────────────────────────────────────────
-    if async_can_overlap and num_k_iterations > 1:
-        # Track mma[k-1] position for overlap. In the prologue, mma[0] was
-        # placed at the end (after load[0] + shared_load[0]).
-        mma_full_dur = sum(full_durations[s.name] for s in mma_subs)
-        mma_start_prev = prologue_end - mma_full_dur
-        mma_end_prev = prologue_end
+    prefetch_distance = max(0, tiling.stage_count - 1) if async_can_overlap else 0
 
-        for k in range(1, num_k_iterations):
-            # load[k] starts at mma[k-1].start — overlaps with mma[k-1].
-            # Use throughput-only durations (latency hidden by pipeline).
-            load_start = mma_start_prev
-            sub_cycle = load_start
-            for s in load_subs:
-                dur = tp_durations[s.name]
-                _place(s, sub_cycle, dur, k)
-                sub_cycle += dur
-            load_end = sub_cycle
+    # ── Main loop ──────────────────────────────────────────────────────
+    if async_can_overlap and prefetch_distance > 0:
+        prefetched: set[int] = set()
+        ready_cycle: dict[int, int] = {}
 
-            # shared_load[k] starts after load[k] (data dependency).
-            # It can overlap with mma[k-1] (different execution units),
-            # so we don't wait for mma[k-1] to finish.
-            shared_load_start = load_end
-            sub_cycle = shared_load_start
-            for s in shared_load_subs:
-                dur = tp_durations[s.name]
-                _place(s, sub_cycle, dur, k)
-                sub_cycle += dur
-            shared_load_end = sub_cycle
+        # Prologue: fill the software-pipeline window with full latency.
+        initial_prefetches = min(prefetch_distance, num_k_iterations)
+        for k in range(initial_prefetches):
+            cycle = _place_prefetch(k, cycle, full_durations)
+            ready_cycle[k] = cycle
+            prefetched.add(k)
 
-            # mma[k] starts after both shared_load[k] and mma[k-1] complete.
-            mma_start = max(shared_load_end, mma_end_prev)
-            sub_cycle = mma_start
-            for s in mma_subs:
-                dur = tp_durations[s.name]
-                _place(s, sub_cycle, dur, k)
-                sub_cycle += dur
-            mma_end = sub_cycle
+        mma_available = cycle
+        prefetch_available = cycle
 
-            mma_start_prev = mma_start
-            mma_end_prev = mma_end
+        for k in range(num_k_iterations):
+            if k not in prefetched:
+                prefetch_available = _place_prefetch(k, prefetch_available, full_durations)
+                ready_cycle[k] = prefetch_available
+                prefetched.add(k)
 
-        cycle = mma_end_prev
-    elif num_k_iterations > 1:
-        # Without async: all sequential per iteration, full durations
-        for k in range(1, num_k_iterations):
-            for group in (load_subs, shared_load_subs, mma_subs):
-                for s in group:
-                    dur = full_durations[s.name]
-                    _place(s, cycle, dur, k)
-                    cycle += dur
+            mma_start = max(mma_available, ready_cycle.get(k, 0))
+
+            future_k = k + prefetch_distance
+            if future_k < num_k_iterations and future_k not in prefetched:
+                prefetch_start = max(mma_start, prefetch_available)
+                prefetch_available = _place_prefetch(future_k, prefetch_start, tp_durations)
+                ready_cycle[future_k] = prefetch_available
+                prefetched.add(future_k)
+
+            mma_durations = full_durations if k == 0 else tp_durations
+            mma_available = _place_mma(k, mma_start, mma_durations)
+
+        cycle = mma_available
+    else:
+        # Without async, or with only one software stage, every iteration is
+        # sequential and pays full stage latency.
+        for k in range(num_k_iterations):
+            cycle = _place_prefetch(k, cycle, full_durations)
+            cycle = _place_mma(k, cycle, full_durations)
 
     # ── Epilogue: sequential, full durations ───────────────────────────
     for s in epilogue:

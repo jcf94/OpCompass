@@ -196,6 +196,70 @@ def test_pipeline_tiling_custom_stage_and_warp_count():
     )
 
 
+def test_pipeline_stage_count_controls_prefetch_distance():
+    """Async software stage count should change the K-slice prefetch distance."""
+    op = get_operator("matmul")()
+    hw = get_hardware("a100")()
+    analyzer = Analyzer()
+
+    base = {
+        "async_copy_enabled": True,
+        "block_m": 128,
+        "block_n": 128,
+        "block_k": 32,
+        "warp_count": 4,
+    }
+    result_s2 = analyzer.analyze(
+        op, hw, DataType.FP16, mode=AnalysisMode.PIPELINE,
+        pipeline_config=PipelineConfig(**base, stage_count=2),
+        M=256, N=128, K=128,
+    )
+    result_s3 = analyzer.analyze(
+        op, hw, DataType.FP16, mode=AnalysisMode.PIPELINE,
+        pipeline_config=PipelineConfig(**base, stage_count=3),
+        M=256, N=128, K=128,
+    )
+
+    def find(schedule, name):
+        return next(s for s in schedule.sub_ops if s.name == name)
+
+    mma0_s2 = find(result_s2.pipeline_schedule, "mma_k0")
+    load1_s2 = find(result_s2.pipeline_schedule, "async_copy_load_A_k1")
+    assert load1_s2.start_cycle == mma0_s2.start_cycle
+
+    mma0_s3 = find(result_s3.pipeline_schedule, "mma_k0")
+    load1_s3 = find(result_s3.pipeline_schedule, "async_copy_load_A_k1")
+    load2_s3 = find(result_s3.pipeline_schedule, "async_copy_load_A_k2")
+    assert load1_s3.end_cycle <= mma0_s3.start_cycle
+    assert load2_s3.start_cycle == mma0_s3.start_cycle
+    assert result_s3.pipeline_schedule.prologue_cycles > result_s2.pipeline_schedule.prologue_cycles
+
+
+def test_pipeline_stage_count_one_disables_async_prefetch_overlap():
+    """A single software stage has no spare buffer for overlapped prefetch."""
+    op = get_operator("matmul")()
+    hw = get_hardware("a100")()
+    result = Analyzer().analyze(
+        op, hw, DataType.FP16, mode=AnalysisMode.PIPELINE,
+        pipeline_config=PipelineConfig(
+            async_copy_enabled=True,
+            block_m=128,
+            block_n=128,
+            block_k=32,
+            stage_count=1,
+            warp_count=4,
+        ),
+        M=256, N=128, K=128,
+    )
+
+    schedule = result.pipeline_schedule
+    mma0 = next(s for s in schedule.sub_ops if s.name == "mma_k0")
+    load1 = next(s for s in schedule.sub_ops if s.name == "async_copy_load_A_k1")
+
+    assert load1.start_cycle == mma0.end_cycle
+    assert schedule.per_iteration_cycles == schedule.prologue_cycles
+
+
 def test_pipeline_tiling_custom_blocks_validate_shared_memory():
     """Oversized custom tiles should fail clearly instead of being silently shrunk."""
     op = get_operator("matmul")()

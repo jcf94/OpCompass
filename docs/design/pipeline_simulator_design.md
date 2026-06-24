@@ -205,7 +205,14 @@ The core algorithm is in `_reschedule_solid()` (pipeline_model.py:264-376). It m
 load[k] → shared_load[k] → mma[k]   (conceptually)
 ```
 
-But with **software pipelining**, the loads for iteration `k` are issued while MMA for iteration `k-1` is still executing:
+But with **software pipelining**, future loads are issued while an earlier MMA is still executing. The prefetch distance is derived from the selected software pipeline depth:
+
+```
+prefetch_distance = stage_count - 1
+load[k + prefetch_distance] overlaps mma[k]
+```
+
+For the common 2-stage case, this reduces to loading iteration `k+1` during `mma[k]`:
 
 ```
          ┌──────────────────────────────────────────────┐
@@ -219,16 +226,16 @@ Epilogue │                              store_C─write_C │  (after last mma
          └──────────────────────────────────────────────┘
 ```
 
-**Prologue** (k=0): All sub-ops run sequentially with **full duration** (latency + throughput). No overlap is possible because there's no preceding MMA to overlap with.
+**Prologue**: The scheduler fills the prefetch window for the first `min(stage_count - 1, num_k_iterations)` K-slices with **full duration** (latency + throughput), then executes `mma[0]` with full duration. A 2-stage kernel prefetches only `k=0`; a 3-stage kernel prefetches `k=0` and `k=1` before the first MMA.
 
 **Steady State** (k=1..N-1): With async copy enabled:
-- `load[k]` starts at the same cycle as `mma[k-1].start` (overlaps with previous compute).
+- `load[k + prefetch_distance]` starts at the same cycle as `mma[k].start` when the copy engine is available.
 - `shared_load[k]` starts after `load[k]` finishes (data dependency: shared memory must be populated).
 - `mma[k]` starts after **both** `shared_load[k]` and `mma[k-1]` complete.
 - Uses **throughput-only duration** (latency is hidden by the pipeline).
 - Per-iteration advance: `max(load_tp + shared_tp, mma_tp)` — whichever chain is slower.
 
-Without async copy: each iteration is fully sequential (same as prologue).
+Without async copy, or with `stage_count=1`, each iteration is fully sequential (same as prologue).
 
 **Epilogue**: All non-recurring sub-ops (store + write) run sequentially with full duration after the last MMA.
 
@@ -370,9 +377,9 @@ The model simulates one CTA's timeline and then scales to chip level via occupan
 
 ### 4.5 Configurable shared-memory stage count
 
-Shared memory sizing is stage-count aware. Pipeline candidates can use different A/B mainloop buffering depths, and `PipelineConfig.stage_count` can force a specific depth.
+Shared memory sizing and scheduling are stage-count aware. Pipeline candidates can use different A/B mainloop buffering depths, and `PipelineConfig.stage_count` can force a specific depth.
 
-The current scheduler still uses the same one-slice overlap pattern (`load[k]` overlaps `mma[k-1]`). Stage count currently affects feasibility and occupancy through shared-memory usage, but it does not yet change prefetch distance or prologue/drain timing.
+The scheduler uses `prefetch_distance = stage_count - 1` for async paths. This makes stage count affect prologue fill length, load/MMA overlap distance, total CTA timeline, shared-memory usage, and occupancy. The model still does not include barrier costs or producer/consumer warp specialization for deeper pipelines.
 
 ### 4.6 Candidate-selected warp count
 
@@ -485,15 +492,15 @@ The Gantt chart is the main visualization but could be improved:
 
 Each operator's `get_ops_breakdown()` must be manually coded with full knowledge of the target GPU architecture and the CUTLASS implementation pattern. This is labor-intensive and error-prone. An ideal system would derive the decomposition from a higher-level description (e.g., a tensor expression + tiling annotations).
 
-### 5.16 Limited Configurable Pipeline Stage Count
+### 5.16 Simplified Configurable Pipeline Stage Count
 
-The current model supports configurable `stage_count` for candidate generation, user override, shared-memory sizing, and occupancy. The scheduler still overlaps one future K slice against the previous MMA. Real kernels may use 2, 3, 4, or more stages:
+The current model supports configurable `stage_count` for candidate generation, user override, shared-memory sizing, occupancy, and async prefetch distance. Real kernels may use 2, 3, 4, or more stages:
 
 - More stages hide global/TMA latency and smooth producer-consumer bubbles.
 - More stages consume shared memory: `stage_count × (A_tile + B_tile)`.
 - More stages can reduce resident CTAs, which may hurt occupancy and tail behavior.
 
-The correct choice is shape- and architecture-dependent. A large Hopper TMA kernel may prefer deeper staging; a small Ampere tile may perform better with fewer stages and higher occupancy. A future scheduler should make `prefetch_distance = stage_count - 1` affect the actual timeline.
+The scheduler now models the first-order timing effect with `prefetch_distance = stage_count - 1`. The remaining limitation is that stage depth is still represented as symmetric CTA-level buffering. It does not yet model producer warp-groups, consumer warp-groups, mbarrier costs, or architecture-specific wait-group limits.
 
 ### 5.17 No Warp Specialization or Producer/Consumer Scheduling
 
@@ -568,16 +575,45 @@ The model now evaluates a small architecture-aware matmul candidate set and sele
 | Stage classification | Substring heuristics | Fragile, no type system |
 | Warp count | Candidate-selected or user-forced | Limited search, no warp specialization |
 | Precision | Single dtype per analysis | No mixed precision support |
-| Pipeline stages | Configurable stage count for feasibility/occupancy | Stage count does not yet alter prefetch distance |
+| Pipeline stages | Configurable stage count affects feasibility, occupancy, and prefetch distance | No barrier/wait-group or warp-specialized stage model |
 | Candidate search | Small matmul candidate set with rejection reasons | Not a full CUTLASS-scale search |
 
 ---
 
-## 7. Recommended Improvements
+## 7. V1 Plan Completion Record
+
+The pipeline simulator v1 improvement plan has been implemented for matmul pipeline mode. The completed work is:
+
+- Added `PipelineKernelCandidate` to represent concrete implementation strategies, including tile shape, warp count, stage count, copy path, MMA path, scheduling label, CTA order, and rejection reason.
+- Extended `PipelineConfig` with `stage_count` and `warp_count`; user-provided tile, stage, or warp overrides now force a single candidate and fail clearly when infeasible.
+- Extended `TilingInfo` with selected candidate name, stage count, register estimates, and the selected candidate object.
+- Added architecture-aware matmul candidate generation for Ampere, Hopper, Blackwell, and fallback paths, with a small candidate set covering tile shapes, 4/8 warp variants, and 2/3 or 3/4 stage variants where appropriate.
+- Updated pipeline analysis to schedule every feasible matmul candidate and select the one with the lowest `total_time_s`.
+- Added candidate rejection for instruction granularity, shared-memory overflow, register-file capacity, per-block register limits, and per-thread register limits.
+- Changed shared-memory sizing from fixed double-buffering to `stage_count × (A_tile + B_tile) + epilogue_smem`.
+- Added coarse register-pressure estimation and included register limits in resident-CTA occupancy.
+- Made async scheduler stage-depth aware with `prefetch_distance = stage_count - 1`; deeper stage counts now change prologue fill length and K-slice load/MMA overlap.
+- Exposed `--stage-count` and `--warp-count` through the CLI, server API, and web UI.
+- Updated JSON/table/UI output to report selected candidate, stage count, warps/block, shared memory, and register estimates.
+- Added tests for candidate selection, forced overrides, stage/warp CLI options, register-pressure rejection, stage-depth prefetch distance, and updated pipeline expectations.
+
+The v1 implementation intentionally does not yet expand beyond matmul, replace name-based stage classification, add explicit barrier/wait costs, or model warp-specialized producer/consumer groups.
+
+---
+
+## 8. Recommended Improvements
 
 The following items are ordered by how much they improve the model's ability to represent realistic best-case hardware performance.
 
-### 7.1 Expand the Kernel Candidate Model
+Near-term TODO items:
+
+1. Replace fixed stage grouping with dependency-graph scheduling while preserving the current matmul fast path.
+2. Split memory timing into copy-engine, L2, and HBM resources instead of only `max(local copy, HBM)`.
+3. Add barrier/wait-group costs for `cp.async`, TMA, and WGMMA paths.
+4. Add a confidence/known-limitations field to pipeline results for UI and CLI reporting.
+5. Start the next operator template with convolution-as-implicit-GEMM before tackling flash attention.
+
+### 8.1 Expand the Kernel Candidate Model
 
 `PipelineKernelCandidate` v1 is implemented for matmul. The next step is to expand the candidate catalog and make more candidate fields operational:
 
@@ -585,17 +621,22 @@ The following items are ordered by how much they improve the model's ability to 
 - Make `scheduling`, `cta_order`, and copy/MMA path labels affect timing and memory reuse instead of serving mostly as metadata.
 - Preserve rejected candidates with enough diagnostics for UI comparison and tuning guidance.
 
-### 7.2 Make Stage Count Affect Scheduling
+### 8.2 Refine Stage-Depth Scheduling
 
-`stage_count` is now part of `PipelineConfig`, tiling metadata, shared-memory sizing, and candidate feasibility. The scheduler should next allow load distance greater than one:
+`stage_count` is now part of `PipelineConfig`, tiling metadata, shared-memory sizing, candidate feasibility, occupancy, and async prefetch distance. The implemented baseline is:
 
 ```
 load[k + prefetch_distance] overlaps mma[k]
+prefetch_distance = stage_count - 1
 ```
 
-For a first implementation, `prefetch_distance = stage_count - 1` is enough. The steady-state advance remains bounded by the slowest resource chain, but prologue and epilogue length change with stage depth. This captures the main tradeoff beyond v1: more buffering hides latency but consumes shared memory and may reduce occupancy.
+The steady-state advance remains bounded by the slowest resource chain, while prologue fill length changes with stage depth. Remaining refinements:
 
-### 7.3 Refine Register-Based Occupancy
+- Add `cp.async.wait_group`, TMA mbarrier, and WGMMA wait/commit costs.
+- Distinguish copy-engine queue depth from software stage count.
+- Model producer/consumer warp specialization so Hopper/Blackwell stage depth changes register allocation and barrier behavior.
+
+### 8.3 Refine Register-Based Occupancy
 
 Pipeline mode now estimates registers per thread/block and includes them in resident CTA calculation:
 
@@ -611,7 +652,7 @@ The estimate should be refined:
 
 Even a coarse register model is valuable because it prevents overly optimistic large-tile candidates.
 
-### 7.4 Separate Copy Engine, L2, and HBM More Explicitly
+### 8.4 Separate Copy Engine, L2, and HBM More Explicitly
 
 The current global/async duration already uses `max(local copy time, HBM source time)`. The next step is to expose three memory resources:
 
@@ -627,7 +668,7 @@ max(copy_engine_time, l2_time, hbm_time)
 
 This matters when effective HBM traffic is small but L2 bandwidth or copy engine bandwidth still limits the kernel.
 
-### 7.5 Improve L2 Reuse Model
+### 8.5 Improve L2 Reuse Model
 
 The current matmul L2 model should evolve from capacity-only fit ratio to a scheduling-aware model:
 
@@ -638,7 +679,7 @@ The current matmul L2 model should evolve from capacity-only fit ratio to a sche
 
 A practical intermediate model is to add an `l2_residency_efficiency` factor by architecture and CTA order, calibrated against known GEMM behavior.
 
-### 7.6 Model Warp Specialization for Hopper/Blackwell
+### 8.6 Model Warp Specialization for Hopper/Blackwell
 
 For TMA/WGMMA kernels, represent producer and consumer warp-groups separately:
 
@@ -648,7 +689,7 @@ For TMA/WGMMA kernels, represent producer and consumer warp-groups separately:
 
 This should affect `num_warps_per_block`, stage overlap, register allocation, and barrier overhead. It will also make Hopper/Blackwell defaults more realistic than treating them as faster Ampere-style kernels.
 
-### 7.7 Add Barrier and Synchronization Costs
+### 8.7 Add Barrier and Synchronization Costs
 
 Add explicit barrier sub-ops or per-iteration overheads:
 
@@ -659,7 +700,7 @@ Add explicit barrier sub-ops or per-iteration overheads:
 
 These costs are small for large K but visible for small tiles, skinny GEMMs, and short-K workloads.
 
-### 7.8 Add Tail and Small-Shape Efficiency Factors
+### 8.8 Add Tail and Small-Shape Efficiency Factors
 
 Best kernels are still less efficient when shapes underfill CTAs or produce partial waves. Add penalties or exact accounting for:
 
@@ -670,7 +711,7 @@ Best kernels are still less efficient when shapes underfill CTAs or produce part
 
 The current model already validates tile granularity, but it does not distinguish full tiles from edge tiles in the schedule.
 
-### 7.9 Extend Beyond Matmul with Operator-Specific Pipeline Templates
+### 8.9 Extend Beyond Matmul with Operator-Specific Pipeline Templates
 
 Next operator templates should be prioritized by performance relevance and clear hardware structure:
 
@@ -681,7 +722,7 @@ Next operator templates should be prioritized by performance relevance and clear
 
 Each operator should define both logical local traffic and effective HBM traffic. If no reuse model exists, defaulting effective to logical is acceptable but should be surfaced as a confidence limitation.
 
-### 7.10 Add Calibration and Confidence Reporting
+### 8.10 Add Calibration and Confidence Reporting
 
 The model should expose a confidence level or known-missing-features list with each result:
 
