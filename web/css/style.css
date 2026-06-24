@@ -654,6 +654,22 @@ select:focus, input:focus {
   border-top: 3px solid var(--compute);
 }
 
+.pipeline-stage.async,
+.pipeline-stage.tma-load,
+.pipeline-stage.tma-store {
+  border-top: 3px solid #059669;
+  background: #f0fdf4;
+}
+
+.pipeline-stage.tmem {
+  border-top: 3px solid #0891b2;
+  background: #ecfeff;
+}
+
+.pipeline-stage.shared {
+  border-top: 3px solid #7c3aed;
+}
+
 /* Arrow between stages */
 .pipeline-arrow {
   display: flex;
@@ -722,8 +738,33 @@ select:focus, input:focus {
   margin-bottom: 0.35rem;
 }
 
-.stage-type-badge.mem  { background: #f3f0ff; color: var(--memory); }
+.stage-type-badge.mem,
+.stage-type-badge.memory,
+.stage-type-badge.shared { background: #f3f0ff; color: var(--memory); }
 .stage-type-badge.comp { background: #eff3fb; color: var(--compute); }
+.stage-type-badge.async,
+.stage-type-badge.tma-load,
+.stage-type-badge.tma-store { background: #dcfce7; color: #047857; }
+.stage-type-badge.tmem { background: #cffafe; color: #0e7490; }
+
+.pipeline-feature-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  margin-top: var(--space-sm);
+}
+
+.pipeline-feature-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  padding: 0.2rem 0.45rem;
+}
 
 .stage-latency {
   font-family: var(--font-mono);
@@ -811,8 +852,14 @@ select:focus, input:focus {
   font-family: var(--font-mono);
 }
 
-.pipeline-table .stage-badge.mem  { background: #f3f0ff; color: var(--memory); }
+.pipeline-table .stage-badge.mem,
+.pipeline-table .stage-badge.memory,
+.pipeline-table .stage-badge.shared { background: #f3f0ff; color: var(--memory); }
 .pipeline-table .stage-badge.comp { background: #eff3fb; color: var(--compute); }
+.pipeline-table .stage-badge.async,
+.pipeline-table .stage-badge.tma-load,
+.pipeline-table .stage-badge.tma-store { background: #dcfce7; color: #047857; }
+.pipeline-table .stage-badge.tmem { background: #cffafe; color: #0e7490; }
 
 .pipeline-table .overlap-cell {
   font-family: var(--font-sans);

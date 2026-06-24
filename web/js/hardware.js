@@ -281,91 +281,101 @@ function renderPipeline() {
     const s = {};
     stages.forEach(st => { s[st.name] = st; });
 
-    // Classify each stage
+    function stageInfo(stage) {
+        const name = stage.name;
+        const desc = (stage.description || '').toLowerCase();
+        if (name === 'async_copy_load') {
+            if (desc.includes('tensor memory accelerator') || desc.includes('tma')) {
+                return { type: 'memory', cls: 'tma-load', label: 'Load-TMA', unit: 'B/clk/SM' };
+            }
+            return { type: 'memory', cls: 'async', label: 'Async Copy', unit: 'B/clk/SM' };
+        }
+        if (name === 'async_copy_store') {
+            const label = desc.includes('dedicated') ? 'Store-TMA' : 'TMA Store';
+            return { type: 'memory', cls: 'tma-store', label, unit: 'B/clk/SM' };
+        }
+        if (name === 'tmem_load') {
+            return { type: 'memory', cls: 'tmem', label: 'TMEM', unit: 'B/clk/SM' };
+        }
+        if (/mma/.test(name)) {
+            return { type: 'compute', cls: 'compute', label: 'Tensor Core', unit: 'FMA/clk/SM' };
+        }
+        if (/alu|fma/.test(name)) {
+            return { type: 'compute', cls: 'compute', label: 'CUDA Core', unit: 'FMA/clk/SM' };
+        }
+        if (/shared/.test(name)) {
+            return { type: 'memory', cls: 'shared', label: 'Shared Mem', unit: 'B/clk/SM' };
+        }
+        if (/read|load|write|store|copy/.test(name)) {
+            return { type: 'memory', cls: 'memory', label: 'Memory', unit: 'B/clk/SM' };
+        }
+        return { type: 'memory', cls: 'memory', label: 'Memory', unit: 'B/clk/SM' };
+    }
+
     function stageType(name) {
-        if (/read|load|write|store|copy/.test(name)) return 'memory';
-        if (/mma|alu|fma/.test(name)) return 'compute';
-        return 'memory';
+        return stageInfo({ name, description: s[name]?.description || '' }).type;
     }
 
-    function stageTypeLabel(type) {
-        return type === 'compute' ? 'comp' : 'mem';
+    function stageTypeLabel(info) {
+        return info.type === 'compute' ? 'comp' : info.cls;
     }
 
-    function stageBadgeHtml(type) {
-        const cls = type === 'compute' ? 'comp' : 'mem';
-        const label = type === 'compute' ? 'Compute' : 'Memory';
-        return `<span class="stage-type-badge ${cls}">${label}</span>`;
+    function stageBadgeHtml(info) {
+        return `<span class="stage-type-badge ${stageTypeLabel(info)}">${info.label}</span>`;
     }
 
-    function stageCardHtml(name, type) {
+    function stageCardHtml(name) {
         const st = s[name];
         if (!st) return '';
-        const isMem = type === 'memory';
-        const unit = isMem ? 'B/clk/SM' : 'FMA/clk/SM';
+        const info = stageInfo(st);
+        const title = st.description ? ` title="${st.description}"` : '';
         return `
-        <div class="pipeline-stage ${type}">
+        <div class="pipeline-stage ${info.type} ${info.cls}"${title}>
           <div class="stage-name">${st.name}</div>
-          ${stageBadgeHtml(type)}
+          ${stageBadgeHtml(info)}
           <div class="stage-latency">${st.latency_cycles} cyc latency</div>
-          <div class="stage-throughput">${st.throughput_per_cycle} ${unit}</div>
+          <div class="stage-throughput">${st.throughput_per_cycle} ${info.unit}</div>
         </div>`;
     }
 
-    // Only render what's available in the data
-    const memStages = [];
-    const compStages = [];
-    stages.forEach(st => {
-        if (stageType(st.name) === 'memory') memStages.push(st);
-        else compStages.push(st);
-    });
-
-    // Build the main data path: memory stages in order, with compute
-    // shown as a parallel group between reads and writes
-    const readStages = memStages.filter(st => /read|load|copy/.test(st.name) && !/store|write/.test(st.name));
-    const writeStages = memStages.filter(st => /store|write/.test(st.name));
-
-    // Separate async copy from main path
-    const asyncStages = readStages.filter(st => st.name.includes('async'));
-    const mainReadStages = readStages.filter(st => !st.name.includes('async'));
+    function featureChips() {
+        const names = new Set(stages.map(st => st.name));
+        const chips = [];
+        if (names.has('async_copy_load')) {
+            const load = s.async_copy_load;
+            const desc = (load.description || '').toLowerCase();
+            chips.push(desc.includes('tma') ? 'TMA async load' : 'Async copy load');
+        }
+        if (names.has('async_copy_store')) {
+            const store = s.async_copy_store;
+            const desc = (store.description || '').toLowerCase();
+            chips.push(desc.includes('dedicated') ? 'Dedicated Store-TMA' : 'TMA store');
+        }
+        if (names.has('tmem_load')) chips.push('TMEM accumulator readout');
+        if (stages.some(st => /wgmma|4th-gen tensor/i.test(st.description || ''))) chips.push('WGMMA-style Tensor Core');
+        if (stages.some(st => /5th-gen tensor|umma/i.test(st.description || ''))) chips.push('UMMA-style Tensor Core');
+        return chips.map(chip => `<span class="pipeline-feature-chip">${chip}</span>`).join('');
+    }
 
     let html = '';
 
-    // ── Main data path ─────────────────────────────────────────
-    html += '<div class="pipeline-flow">';
-
-    // Memory read stages
-    mainReadStages.forEach((st, i) => {
-        html += stageCardHtml(st.name, 'memory');
-        html += `<div class="pipeline-arrow">${arrowSvg()}</div>`;
-    });
-
-    // Compute stages (grouped vertically)
-    if (compStages.length > 0) {
-        html += '<div class="pipeline-parallel">';
-        compStages.forEach(st => {
-            html += stageCardHtml(st.name, 'compute');
-        });
-        html += '</div>';
-        html += `<div class="pipeline-arrow">${arrowSvg()}</div>`;
+    // ── Modeled hardware stage order ───────────────────────────
+    const chips = featureChips();
+    if (chips) {
+        html += `<div class="pipeline-feature-row">${chips}</div>`;
     }
-
-    // Memory write stages
-    writeStages.forEach((st, i) => {
-        html += stageCardHtml(st.name, 'memory');
-        if (i < writeStages.length - 1) {
-            html += `<div class="pipeline-arrow">${arrowSvg()}</div>`;
-        }
+    html += '<div class="pipeline-flow">';
+    stages.forEach((st, i) => {
+        html += stageCardHtml(st.name);
+        if (i < stages.length - 1) html += `<div class="pipeline-arrow">${arrowSvg()}</div>`;
     });
-
     html += '</div>'; // end .pipeline-flow
 
-    // ── Async copy path (parallel, dashed) ─────────────────────
-    if (asyncStages.length > 0) {
+    if (stages.some(st => st.name === 'async_copy_load' || st.name === 'async_copy_store' || st.name === 'tmem_load')) {
         html += `
         <div class="async-callout">
-          <div class="async-callout-title">⇅ Async Copy Path (Ampere+)</div>
-          <p>Bypasses L1 cache and Register File. Overlaps with Tensor Core and CUDA compute. Works with async barriers for software pipelining.</p>
+          <div class="async-callout-title">Architecture-specific pipeline features</div>
+          <p>Async copy/TMA stages feed shared memory ahead of MMA according to the selected software stage depth. Hopper adds TMA load/store paths; Blackwell adds TMEM accumulator readout and a dedicated Store-TMA stage.</p>
         </div>`;
     }
 
@@ -396,13 +406,13 @@ function renderPipeline() {
                 <tbody>
                     ${stages.map(st => {
                         const type = stageType(st.name);
-                        const isMem = type === 'memory';
-                        const unit = isMem ? 'Bytes' : 'FMA ops';
+                        const info = stageInfo(st);
+                        const unit = type === 'memory' ? 'Bytes' : 'FMA ops';
                         const overlaps = getOverlaps(st.name);
                         return `
                             <tr>
                                 <td><code>${st.name}</code></td>
-                                <td><span class="stage-badge ${stageTypeLabel(type)}">${type}</span></td>
+                                <td><span class="stage-badge ${stageTypeLabel(info)}">${info.label}</span></td>
                                 <td>${st.latency_cycles}</td>
                                 <td>${st.throughput_per_cycle} ${unit}</td>
                                 <td class="overlap-cell">${overlaps}</td>
@@ -419,11 +429,13 @@ function renderPipeline() {
 function getOverlaps(name) {
     const map = {
         'global_read':     ['mma', 'fma_alu'],
-        'async_copy_load': ['mma', 'fma_alu'],
+        'async_copy_load': ['mma', 'fma_alu', 'shared_load of ready tiles'],
         'shared_load':     ['mma (other warps)', 'fma_alu (other warps)'],
         'mma':             ['global_read', 'async_copy_load', 'shared_load/store', 'fma_alu (INT32)'],
         'fma_alu':         ['INT32 ops (same clock)', 'global_read', 'async_copy'],
+        'tmem_load':       ['late epilogue work', 'Store-TMA drain'],
         'shared_store':    ['mma (other warps)', 'fma_alu (other warps)'],
+        'async_copy_store':['late compute / next CTA in persistent kernels'],
         'global_write':    ['mma (other warps)', 'fma_alu (other warps)'],
     };
     return (map[name] || []).join(' · ') || '—';

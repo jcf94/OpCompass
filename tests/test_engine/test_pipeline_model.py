@@ -432,6 +432,49 @@ def test_pipeline_h100_fp8_faster_than_fp16():
     assert result_fp8.sol_time_s < result_fp16.sol_time_s
 
 
+def test_pipeline_hopper_uses_tma_store_epilogue():
+    """Hopper matmul pipeline should expose the TMA store epilogue path."""
+    op = get_operator("matmul")()
+    hw = get_hardware("h100")()
+    config = PipelineConfig(async_copy_enabled=True)
+
+    result = Analyzer().analyze(
+        op, hw, DataType.FP16, mode=AnalysisMode.PIPELINE,
+        pipeline_config=config, M=4096, N=4096, K=4096,
+    )
+
+    stages = {s.pipeline_stage for s in result.pipeline_schedule.sub_ops}
+    names = {s.name for s in result.pipeline_schedule.sub_ops}
+
+    assert result.tiling_info.candidate.mma_path == "wgmma"
+    assert result.tiling_info.candidate.copy_path == "tma"
+    assert "async_copy_store" in stages
+    assert "async_copy_store_C" in names
+    assert "tmem_load" not in stages
+
+
+def test_pipeline_blackwell_uses_tmem_and_dedicated_tma_store():
+    """Blackwell matmul pipeline should expose TMEM readout and Store-TMA."""
+    op = get_operator("matmul")()
+    hw = get_hardware("b200")()
+    config = PipelineConfig(async_copy_enabled=True)
+
+    result = Analyzer().analyze(
+        op, hw, DataType.FP16, mode=AnalysisMode.PIPELINE,
+        pipeline_config=config, M=4096, N=4096, K=4096,
+    )
+
+    stages = {s.pipeline_stage for s in result.pipeline_schedule.sub_ops}
+    names = {s.name for s in result.pipeline_schedule.sub_ops}
+
+    assert result.tiling_info.candidate.mma_path == "umma"
+    assert result.tiling_info.candidate.copy_path == "tma"
+    assert "tmem_load" in stages
+    assert "tmem_load_C" in names
+    assert "async_copy_store" in stages
+    assert "async_copy_store_C" in names
+
+
 def test_solar_arch_configs_match_hardware_peaks():
     """Custom SOLAR MAC/cycle values should match OpCompass hardware peaks."""
     arch_dir = Path(__file__).resolve().parents[2] / "opcompass" / "configs" / "solar_arch"
