@@ -22,6 +22,8 @@ const $sparsityToggle = document.getElementById("sparsity-toggle");
 const $blockMInput = document.getElementById("block-m-input");
 const $blockNInput = document.getElementById("block-n-input");
 const $blockKInput = document.getElementById("block-k-input");
+const $stageCountInput = document.getElementById("stage-count-input");
+const $warpCountInput = document.getElementById("warp-count-input");
 const $tileResetBtn = document.getElementById("tile-reset-btn");
 const $tileConstraintHint = document.getElementById("tile-constraint-hint");
 
@@ -268,12 +270,16 @@ function collectPipelineConfig() {
     const blockM = parseTile($blockMInput);
     const blockN = parseTile($blockNInput);
     const blockK = parseTile($blockKInput);
+    const stageCount = parseTile($stageCountInput);
+    const warpCount = parseTile($warpCountInput);
     validateTile("block_m", blockM);
     validateTile("block_n", blockN);
     validateTile("block_k", blockK);
     if (blockM != null) config.block_m = blockM;
     if (blockN != null) config.block_n = blockN;
     if (blockK != null) config.block_k = blockK;
+    if (stageCount != null) config.stage_count = stageCount;
+    if (warpCount != null) config.warp_count = warpCount;
     return config;
 }
 
@@ -632,10 +638,16 @@ $sparsityToggle.addEventListener("change", () => triggerAnalysis(true));
         }
     });
 });
+[$stageCountInput, $warpCountInput].forEach((input) => {
+    input.addEventListener("input", () => triggerAnalysis(false));
+    input.addEventListener("change", () => triggerAnalysis(true));
+});
 $tileResetBtn.addEventListener("click", () => {
     $blockMInput.value = "";
     $blockNInput.value = "";
     $blockKInput.value = "";
+    $stageCountInput.value = "";
+    $warpCountInput.value = "";
     // Reset placeholder to auto hint; renderTilingInfo will update after analysis
     applyTileInputConstraints();
     triggerAnalysis(true);

@@ -2,8 +2,9 @@ from __future__ import annotations
 """Matrix multiplication: C = A × B  with shapes (M, K) × (K, N) → (M, N)."""
 
 import math
+from dataclasses import replace
 
-from opcompass.models import DataType, SubOp, TilingInfo
+from opcompass.models import DataType, PipelineConfig, PipelineKernelCandidate, SubOp, TilingInfo
 from opcompass.operators.base import Operator
 
 
@@ -153,71 +154,235 @@ def get_inputs():
         if dtype is None:
             dtype = DataType.FP16
 
-        cu = hardware.compute_unit
-        arch = getattr(hardware, "architecture", "").lower()
+        candidate = self.get_pipeline_candidates(
+            hardware, dtype, pipeline_config=pipeline_config, **dims
+        )[0]
+        return self._tiling_from_candidate(candidate, hardware, dtype)
 
-        # CUTLASS default tiling per architecture
+    def get_pipeline_candidates(self, hardware, dtype=None, pipeline_config=None, **dims):
+        """Return feasible matmul pipeline candidates in preference order."""
+        if dtype is None:
+            dtype = DataType.FP16
+        if pipeline_config is None:
+            pipeline_config = PipelineConfig()
+
+        raw_candidates = self._raw_pipeline_candidates(hardware, dtype, pipeline_config)
+        feasible: list[PipelineKernelCandidate] = []
+        rejected: list[PipelineKernelCandidate] = []
+
+        for candidate in raw_candidates:
+            try:
+                self._tiling_from_candidate(candidate, hardware, dtype)
+                feasible.append(candidate)
+            except ValueError as exc:
+                rejected.append(replace(candidate, rejection_reason=str(exc)))
+
+        if feasible:
+            return feasible
+
+        if self._has_forced_pipeline_shape(pipeline_config) and rejected:
+            raise ValueError(rejected[0].rejection_reason)
+        if rejected:
+            reasons = "; ".join(c.rejection_reason for c in rejected[:3])
+            raise ValueError(f"No feasible pipeline candidates for {hardware.name}: {reasons}")
+        raise ValueError(f"No pipeline candidates for {hardware.name}")
+
+    def get_rejected_pipeline_candidates(self, hardware, dtype=None, pipeline_config=None, **dims):
+        """Return rejected candidates with reasons for diagnostics."""
+        if dtype is None:
+            dtype = DataType.FP16
+        if pipeline_config is None:
+            pipeline_config = PipelineConfig()
+
+        rejected: list[PipelineKernelCandidate] = []
+        for candidate in self._raw_pipeline_candidates(hardware, dtype, pipeline_config):
+            try:
+                self._tiling_from_candidate(candidate, hardware, dtype)
+            except ValueError as exc:
+                rejected.append(replace(candidate, rejection_reason=str(exc)))
+        return rejected
+
+    def _raw_pipeline_candidates(self, hardware, dtype, pipeline_config):
+        arch = getattr(hardware, "architecture", "").lower()
+        base_tiles = self._base_candidate_tiles(arch, dtype)
+        copy_path = self._copy_path(arch, pipeline_config.async_copy_enabled)
+        mma_path = self._mma_path(arch, dtype)
+        scheduling = "warp_specialized" if arch in {"hopper", "blackwell"} else "standard"
+
+        forced = self._has_forced_pipeline_shape(pipeline_config)
+        if forced:
+            default_m, default_n, default_k = base_tiles[0]
+            tile = (
+                pipeline_config.block_m or default_m,
+                pipeline_config.block_n or default_n,
+                pipeline_config.block_k or default_k,
+            )
+            stage_counts = [pipeline_config.stage_count or self._default_stage_count(arch)]
+            warp_counts = [pipeline_config.warp_count or self._default_warp_count(arch, tile)]
+            base_tiles = [tile]
+        else:
+            stage_counts = [2, 3] if arch == "ampere" else [3, 4] if arch in {"hopper", "blackwell"} else [2]
+            warp_counts = [4, 8] if arch in {"ampere", "hopper", "blackwell"} else [4]
+
+        candidates: list[PipelineKernelCandidate] = []
+        seen: set[tuple[int, int, int, int, int]] = set()
+        for bM, bN, bK in base_tiles:
+            for stage_count in stage_counts:
+                for warp_count in warp_counts:
+                    key = (bM, bN, bK, warp_count, stage_count)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    candidates.append(PipelineKernelCandidate(
+                        name=f"{arch or 'generic'}_{bM}x{bN}x{bK}_w{warp_count}_s{stage_count}",
+                        block_m=bM,
+                        block_n=bN,
+                        block_k=bK,
+                        warp_count=warp_count,
+                        stage_count=stage_count,
+                        copy_path=copy_path,
+                        mma_path=mma_path,
+                        scheduling=scheduling,
+                        cta_order="swizzled" if arch in {"hopper", "blackwell"} else "row_major",
+                    ))
+        return candidates
+
+    @staticmethod
+    def _has_forced_pipeline_shape(pipeline_config) -> bool:
+        return bool(
+            pipeline_config
+            and (
+                pipeline_config.block_m
+                or pipeline_config.block_n
+                or pipeline_config.block_k
+                or pipeline_config.stage_count
+                or pipeline_config.warp_count
+            )
+        )
+
+    @staticmethod
+    def _base_candidate_tiles(arch: str, dtype) -> list[tuple[int, int, int]]:
         if arch == "ampere":
             if dtype in (DataType.FP16, DataType.BF16):
-                bM, bN, bK = 128, 128, 32
-            elif dtype == DataType.TF32:
-                bM, bN, bK = 128, 128, 16
-            elif dtype == DataType.FP32:
-                bM, bN, bK = 64, 64, 16
-            else:
-                bM, bN, bK = 128, 128, 32
-        elif arch == "hopper":
-            bM, bN, bK = 128, 128, 64
-        elif arch == "blackwell":
-            # Blackwell has 228 KB shared memory + 256 KB TMEM per SM.
-            # TMEM handles accumulator storage, reducing shared memory
-            # pressure.  Use same base tile as Hopper; block_K can be
-            # larger when TMEM-accelerated instructions are used.
+                return [(128, 128, 32), (128, 64, 32), (64, 128, 32)]
+            if dtype == DataType.TF32:
+                return [(128, 128, 16), (128, 64, 16), (64, 128, 16)]
+            if dtype == DataType.FP32:
+                return [(64, 64, 16), (128, 64, 16), (64, 128, 16)]
+            return [(128, 128, 32), (128, 64, 32), (64, 128, 32)]
+        if arch == "hopper":
+            if dtype == DataType.FP32:
+                return [(128, 128, 32), (64, 128, 32), (128, 64, 32)]
+            return [(128, 128, 64), (128, 256, 64), (256, 128, 64)]
+        if arch == "blackwell":
             if dtype in (DataType.FP16, DataType.BF16, DataType.FP8):
-                bM, bN, bK = 256, 128, 64
-            elif dtype == DataType.TF32:
-                bM, bN, bK = 128, 128, 64
-            elif dtype == DataType.FP32:
-                bM, bN, bK = 128, 128, 32
-            else:
-                bM, bN, bK = 256, 128, 64
-        else:
-            bM, bN, bK = 64, 64, 32
+                return [(256, 128, 64), (128, 128, 64), (256, 256, 64)]
+            if dtype == DataType.TF32:
+                return [(128, 128, 64), (128, 256, 64), (256, 128, 64)]
+            if dtype == DataType.FP32:
+                return [(128, 128, 32), (128, 64, 32), (64, 128, 32)]
+            return [(256, 128, 64), (128, 128, 64), (256, 256, 64)]
+        return [(64, 64, 32)]
 
+    @staticmethod
+    def _copy_path(arch: str, async_enabled: bool) -> str:
+        if not async_enabled:
+            return "global_load"
+        if arch in {"hopper", "blackwell"}:
+            return "tma"
+        return "cp_async"
+
+    @staticmethod
+    def _mma_path(arch: str, dtype) -> str:
+        if dtype in (DataType.FP32, DataType.FP64):
+            return "cuda_fma"
+        if arch == "blackwell":
+            return "umma"
+        if arch == "hopper":
+            return "wgmma"
+        return "mma"
+
+    @staticmethod
+    def _default_stage_count(arch: str) -> int:
+        return 3 if arch in {"hopper", "blackwell"} else 2
+
+    @staticmethod
+    def _default_warp_count(arch: str, tile: tuple[int, int, int]) -> int:
+        bM, bN, _ = tile
+        return 8 if arch in {"hopper", "blackwell"} and bM * bN >= 32768 else 4
+
+    def _tiling_from_candidate(self, candidate, hardware, dtype) -> TilingInfo:
         constraints = self.get_tile_constraints(hardware, dtype)
-        if pipeline_config is not None:
-            bM = self._apply_tile_override("block_m", bM, pipeline_config.block_m, constraints)
-            bN = self._apply_tile_override("block_n", bN, pipeline_config.block_n, constraints)
-            bK = self._apply_tile_override("block_k", bK, pipeline_config.block_k, constraints)
+        for name, value in (
+            ("block_m", candidate.block_m),
+            ("block_n", candidate.block_n),
+            ("block_k", candidate.block_k),
+        ):
+            self._apply_tile_override(name, value, value, constraints)
+        if candidate.stage_count <= 0:
+            raise ValueError("stage_count must be a positive integer")
+        if candidate.warp_count <= 0:
+            raise ValueError("warp_count must be a positive integer")
 
         bs = dtype.byte_size
-        # Double-buffered shared memory: 2 × (A_tile + B_tile) + C_stage
-        smem = 2 * (bM * bK + bK * bN) * bs + bM * bN * bs
-
-        # Check against hardware shared memory limit
+        smem = self._shared_memory_bytes(
+            candidate.block_m, candidate.block_n, candidate.block_k, bs, candidate.stage_count
+        )
+        cu = hardware.compute_unit
         smem_limit = cu.shared_memory_max_kb * 1024
-        if pipeline_config is not None and (
-            pipeline_config.block_m or pipeline_config.block_n or pipeline_config.block_k
-        ):
-            if smem > smem_limit:
-                raise ValueError(
-                    f"Requested tile {bM}x{bN}x{bK} uses {smem / 1024:.1f} KB shared memory, "
-                    f"exceeding {hardware.name} limit of {cu.shared_memory_max_kb} KB per {cu.name}."
-                )
-        elif smem > smem_limit:
-            while bK > 8 and smem > smem_limit:
-                bK //= 2
-                smem = 2 * (bM * bK + bK * bN) * bs + bM * bN * bs
+        if smem_limit > 0 and smem > smem_limit:
+            raise ValueError(
+                f"Requested tile {candidate.block_m}x{candidate.block_n}x{candidate.block_k} "
+                f"with {candidate.stage_count} stages uses {smem / 1024:.1f} KB shared memory, "
+                f"exceeding {hardware.name} limit of {cu.shared_memory_max_kb} KB per {cu.name}."
+            )
 
-        num_warps = 4  # standard warp-group size for CUTLASS
+        regs_per_thread = self._estimate_registers_per_thread(candidate)
+        threads_per_block = candidate.warp_count * cu.threads_per_warp
+        regs_per_block = regs_per_thread * threads_per_block
+        register_file_regs = (cu.register_file_kb * 1024) // 4 if cu.register_file_kb > 0 else 0
+        if cu.max_registers_per_thread > 0 and regs_per_thread > cu.max_registers_per_thread:
+            raise ValueError(
+                f"Candidate {candidate.name} estimates {regs_per_thread} registers/thread, "
+                f"exceeding {hardware.name} limit of {cu.max_registers_per_thread}."
+            )
+        if cu.max_registers_per_block > 0 and regs_per_block > cu.max_registers_per_block:
+            raise ValueError(
+                f"Candidate {candidate.name} estimates {regs_per_block} registers/block, "
+                f"exceeding {hardware.name} limit of {cu.max_registers_per_block}."
+            )
+        if register_file_regs > 0 and regs_per_block > register_file_regs:
+            raise ValueError(
+                f"Candidate {candidate.name} estimates {regs_per_block} registers/block, "
+                f"exceeding {hardware.name} register file capacity of {register_file_regs} registers."
+            )
 
         return TilingInfo(
-            block_m=bM,
-            block_n=bN,
-            block_k=bK,
+            block_m=candidate.block_m,
+            block_n=candidate.block_n,
+            block_k=candidate.block_k,
             shared_memory_per_block=smem,
-            num_warps_per_block=num_warps,
+            num_warps_per_block=candidate.warp_count,
+            stage_count=candidate.stage_count,
+            registers_per_thread=regs_per_thread,
+            registers_per_block=regs_per_block,
+            candidate_name=candidate.name,
+            candidate=candidate,
         )
+
+    @staticmethod
+    def _shared_memory_bytes(block_m: int, block_n: int, block_k: int, bytes_per_element: float, stage_count: int) -> int:
+        mainloop = stage_count * (block_m * block_k + block_k * block_n) * bytes_per_element
+        epilogue = block_m * block_n * bytes_per_element
+        return int(math.ceil(mainloop + epilogue))
+
+    @staticmethod
+    def _estimate_registers_per_thread(candidate) -> int:
+        threads = max(1, candidate.warp_count * 32)
+        accumulator_regs = math.ceil(candidate.block_m * candidate.block_n / threads)
+        operand_regs = math.ceil(candidate.block_k * (candidate.block_m + candidate.block_n) / (threads * 8))
+        stage_regs = 2 * max(1, candidate.stage_count - 1)
+        return int(24 + accumulator_regs + operand_regs + stage_regs)
 
     @staticmethod
     def _apply_tile_override(name: str, default: int, value, constraints: dict) -> int:

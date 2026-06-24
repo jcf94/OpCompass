@@ -121,6 +121,25 @@ class PipelineConfig:
     block_m: int | None = None            # Optional user-selected CTA tile M
     block_n: int | None = None            # Optional user-selected CTA tile N
     block_k: int | None = None            # Optional user-selected CTA tile K
+    stage_count: int | None = None        # Optional software pipeline stage count
+    warp_count: int | None = None         # Optional user-selected warps per block
+
+
+@dataclass
+class PipelineKernelCandidate:
+    """A concrete pipeline kernel strategy to evaluate."""
+
+    name: str
+    block_m: int
+    block_n: int
+    block_k: int
+    warp_count: int
+    stage_count: int
+    copy_path: str = "cp_async"           # global_load, cp_async, tma
+    mma_path: str = "mma"                 # mma, wgmma, umma, cuda_fma
+    scheduling: str = "standard"          # standard, warp_specialized, persistent
+    cta_order: str = "row_major"          # row_major, column_major, swizzled
+    rejection_reason: str = ""
 
 
 @dataclass
@@ -176,6 +195,11 @@ class TilingInfo:
     block_k: int
     shared_memory_per_block: int = 0
     num_warps_per_block: int = 0
+    stage_count: int = 2
+    registers_per_thread: int = 0
+    registers_per_block: int = 0
+    candidate_name: str = ""
+    candidate: PipelineKernelCandidate | None = None
 
 
 @dataclass
@@ -259,6 +283,7 @@ class AnalysisResult:
     pipeline_config: PipelineConfig | None = None
     tiling_info: TilingInfo | None = None
     pipeline_memory_breakdown: dict[str, float] = field(default_factory=dict)
+    pipeline_candidates: list[PipelineKernelCandidate] = field(default_factory=list)
 
     # ——— solar-specific results (None for non-solar modes) ———
     solar_data: SolarAnalysisData | None = None

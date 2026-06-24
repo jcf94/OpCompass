@@ -513,8 +513,15 @@ const PipelineUI = {
         const container = document.getElementById("pipeline-stats-content");
         if (!container || !schedule) return;
 
+        const stageCount = Number(pipelineConfig?.stage_count || 0);
+        const prefetchDistance = (
+            pipelineConfig?.async_copy_enabled && stageCount > 1
+                ? stageCount - 1
+                : 0
+        );
         const rows = [
             ["K Iterations", schedule.num_k_iterations],
+            ["Prefetch Distance", prefetchDistance + " K-slice" + (prefetchDistance === 1 ? "" : "s")],
             ["Grid Size", schedule.grid_size],
             ["Wave Count", schedule.wave_count],
             ["Prologue", schedule.prologue_cycles + " cycles"],
@@ -546,12 +553,18 @@ const PipelineUI = {
         const blockM = document.getElementById("block-m-input");
         const blockN = document.getElementById("block-n-input");
         const blockK = document.getElementById("block-k-input");
-        if (blockM) { blockM.value = tilingInfo.block_m; blockM.placeholder = tilingInfo.block_m; }
-        if (blockN) { blockN.value = tilingInfo.block_n; blockN.placeholder = tilingInfo.block_n; }
-        if (blockK) { blockK.value = tilingInfo.block_k; blockK.placeholder = tilingInfo.block_k; }
+        const stageCount = document.getElementById("stage-count-input");
+        const warpCount = document.getElementById("warp-count-input");
+        if (blockM) blockM.placeholder = tilingInfo.block_m;
+        if (blockN) blockN.placeholder = tilingInfo.block_n;
+        if (blockK) blockK.placeholder = tilingInfo.block_k;
+        if (stageCount) stageCount.placeholder = tilingInfo.stage_count || "auto";
+        if (warpCount) warpCount.placeholder = tilingInfo.num_warps_per_block || "auto";
 
         const rows = [
-            ["Warps/Block", tilingInfo.num_warps_per_block],
+            ["Candidate", tilingInfo.candidate_name || "default"],
+            ["Regs/Thread", tilingInfo.registers_per_thread || "—"],
+            ["Regs/Block", tilingInfo.registers_per_block || "—"],
             ["Shared Mem", tilingInfo.shared_memory_per_block != null
                 ? (tilingInfo.shared_memory_per_block / 1024).toFixed(1) + " KB"
                 : "—"],

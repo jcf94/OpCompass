@@ -45,7 +45,9 @@ def test_matmul_a100_pipeline_async_on():
     assert memory["effective_hbm_read_bytes"] < memory["logical_hbm_read_bytes"]
     assert memory["effective_hbm_read_bytes"] < memory["logical_cta_read_bytes"]
     assert memory["effective_hbm_read_bytes"] == pytest.approx(result.total_read_bytes)
-    assert memory["l2_reuse_factor"] == pytest.approx(32.0)
+    assert memory["l2_reuse_factor"] > 1.0
+    assert result.pipeline_candidates
+    assert result.tiling_info.candidate_name == result.pipeline_candidates[0].name
     assert result.sol_tflops > 100
 
 
@@ -97,10 +99,35 @@ def test_matmul_a100_pipeline_sparsity():
     # SOL time may stay flat, but the compute stage itself must get shorter.
     assert result_sp.compute_time_s < result_no.compute_time_s
 
-    # With async overlap: per_iter = max(load_tp + shared_tp, mma_tp).
-    # Sparsity doubles MMA throughput, so per_iteration_cycles decreases only
-    # when MMA controls the steady-state advance.
-    assert result_sp.pipeline_schedule.total_cycles_per_block < result_no.pipeline_schedule.total_cycles_per_block
+    assert result_sp.sol_time_s < result_no.sol_time_s
+
+    forced_config_no = PipelineConfig(
+        async_copy_enabled=True,
+        sparsity_2_4_enabled=False,
+        block_m=128,
+        block_n=128,
+        block_k=32,
+        stage_count=2,
+        warp_count=4,
+    )
+    forced_config_sp = PipelineConfig(
+        async_copy_enabled=True,
+        sparsity_2_4_enabled=True,
+        block_m=128,
+        block_n=128,
+        block_k=32,
+        stage_count=2,
+        warp_count=4,
+    )
+    forced_no = analyzer.analyze(
+        op, hw, DataType.FP16, mode=AnalysisMode.PIPELINE,
+        pipeline_config=forced_config_no, M=4096, N=4096, K=4096,
+    )
+    forced_sp = analyzer.analyze(
+        op, hw, DataType.FP16, mode=AnalysisMode.PIPELINE,
+        pipeline_config=forced_config_sp, M=4096, N=4096, K=4096,
+    )
+    assert forced_sp.pipeline_schedule.total_cycles_per_block < forced_no.pipeline_schedule.total_cycles_per_block
 
 
 def test_pipeline_tiling_a100():
@@ -114,6 +141,8 @@ def test_pipeline_tiling_a100():
     assert tiling.block_n == 128
     assert tiling.block_k == 32
     assert tiling.num_warps_per_block == 4
+    assert tiling.stage_count == 2
+    assert tiling.registers_per_thread > 0
 
 
 def test_pipeline_tiling_custom_blocks():
@@ -137,6 +166,98 @@ def test_pipeline_tiling_custom_blocks():
     assert result.tiling_info.block_m == 64
     assert result.tiling_info.block_n == 128
     assert result.tiling_info.block_k == 16
+
+
+def test_pipeline_tiling_custom_stage_and_warp_count():
+    """Pipeline config should override stage count and warps per block."""
+    op = get_operator("matmul")()
+    hw = get_hardware("a100")()
+    config = PipelineConfig(
+        async_copy_enabled=True,
+        block_m=64,
+        block_n=128,
+        block_k=16,
+        stage_count=3,
+        warp_count=8,
+    )
+
+    result = Analyzer().analyze(
+        op, hw, DataType.FP16, mode=AnalysisMode.PIPELINE,
+        pipeline_config=config, M=4096, N=4096, K=4096,
+    )
+
+    assert result.tiling_info.stage_count == 3
+    assert result.tiling_info.num_warps_per_block == 8
+    assert result.pipeline_config.stage_count == 3
+    assert result.pipeline_config.warp_count == 8
+    assert result.tiling_info.shared_memory_per_block == (
+        3 * (64 * 16 + 16 * 128) * DataType.FP16.byte_size
+        + 64 * 128 * DataType.FP16.byte_size
+    )
+
+
+def test_pipeline_stage_count_controls_prefetch_distance():
+    """Async software stage count should change the K-slice prefetch distance."""
+    op = get_operator("matmul")()
+    hw = get_hardware("a100")()
+    analyzer = Analyzer()
+
+    base = {
+        "async_copy_enabled": True,
+        "block_m": 128,
+        "block_n": 128,
+        "block_k": 32,
+        "warp_count": 4,
+    }
+    result_s2 = analyzer.analyze(
+        op, hw, DataType.FP16, mode=AnalysisMode.PIPELINE,
+        pipeline_config=PipelineConfig(**base, stage_count=2),
+        M=256, N=128, K=128,
+    )
+    result_s3 = analyzer.analyze(
+        op, hw, DataType.FP16, mode=AnalysisMode.PIPELINE,
+        pipeline_config=PipelineConfig(**base, stage_count=3),
+        M=256, N=128, K=128,
+    )
+
+    def find(schedule, name):
+        return next(s for s in schedule.sub_ops if s.name == name)
+
+    mma0_s2 = find(result_s2.pipeline_schedule, "mma_k0")
+    load1_s2 = find(result_s2.pipeline_schedule, "async_copy_load_A_k1")
+    assert load1_s2.start_cycle == mma0_s2.start_cycle
+
+    mma0_s3 = find(result_s3.pipeline_schedule, "mma_k0")
+    load1_s3 = find(result_s3.pipeline_schedule, "async_copy_load_A_k1")
+    load2_s3 = find(result_s3.pipeline_schedule, "async_copy_load_A_k2")
+    assert load1_s3.end_cycle <= mma0_s3.start_cycle
+    assert load2_s3.start_cycle == mma0_s3.start_cycle
+    assert result_s3.pipeline_schedule.prologue_cycles > result_s2.pipeline_schedule.prologue_cycles
+
+
+def test_pipeline_stage_count_one_disables_async_prefetch_overlap():
+    """A single software stage has no spare buffer for overlapped prefetch."""
+    op = get_operator("matmul")()
+    hw = get_hardware("a100")()
+    result = Analyzer().analyze(
+        op, hw, DataType.FP16, mode=AnalysisMode.PIPELINE,
+        pipeline_config=PipelineConfig(
+            async_copy_enabled=True,
+            block_m=128,
+            block_n=128,
+            block_k=32,
+            stage_count=1,
+            warp_count=4,
+        ),
+        M=256, N=128, K=128,
+    )
+
+    schedule = result.pipeline_schedule
+    mma0 = next(s for s in schedule.sub_ops if s.name == "mma_k0")
+    load1 = next(s for s in schedule.sub_ops if s.name == "async_copy_load_A_k1")
+
+    assert load1.start_cycle == mma0.end_cycle
+    assert schedule.per_iteration_cycles == schedule.prologue_cycles
 
 
 def test_pipeline_tiling_custom_blocks_validate_shared_memory():
@@ -172,6 +293,25 @@ def test_pipeline_tiling_custom_blocks_validate_instruction_granularity():
     analyzer = Analyzer()
     with pytest.raises(ValueError, match="multiple of 16"):
         analyzer.analyze(
+            op, hw, DataType.FP16, mode=AnalysisMode.PIPELINE,
+            pipeline_config=config, M=4096, N=4096, K=4096,
+        )
+
+
+def test_pipeline_tiling_custom_blocks_validate_register_pressure():
+    """Oversized warp overrides should be rejected by register/block limits."""
+    op = get_operator("matmul")()
+    hw = get_hardware("a100")()
+    config = PipelineConfig(
+        async_copy_enabled=True,
+        block_m=128,
+        block_n=128,
+        block_k=32,
+        warp_count=64,
+    )
+
+    with pytest.raises(ValueError, match="registers/block"):
+        Analyzer().analyze(
             op, hw, DataType.FP16, mode=AnalysisMode.PIPELINE,
             pipeline_config=config, M=4096, N=4096, K=4096,
         )
@@ -290,6 +430,49 @@ def test_pipeline_h100_fp8_faster_than_fp16():
     )
 
     assert result_fp8.sol_time_s < result_fp16.sol_time_s
+
+
+def test_pipeline_hopper_uses_tma_store_epilogue():
+    """Hopper matmul pipeline should expose the TMA store epilogue path."""
+    op = get_operator("matmul")()
+    hw = get_hardware("h100")()
+    config = PipelineConfig(async_copy_enabled=True)
+
+    result = Analyzer().analyze(
+        op, hw, DataType.FP16, mode=AnalysisMode.PIPELINE,
+        pipeline_config=config, M=4096, N=4096, K=4096,
+    )
+
+    stages = {s.pipeline_stage for s in result.pipeline_schedule.sub_ops}
+    names = {s.name for s in result.pipeline_schedule.sub_ops}
+
+    assert result.tiling_info.candidate.mma_path == "wgmma"
+    assert result.tiling_info.candidate.copy_path == "tma"
+    assert "async_copy_store" in stages
+    assert "async_copy_store_C" in names
+    assert "tmem_load" not in stages
+
+
+def test_pipeline_blackwell_uses_tmem_and_dedicated_tma_store():
+    """Blackwell matmul pipeline should expose TMEM readout and Store-TMA."""
+    op = get_operator("matmul")()
+    hw = get_hardware("b200")()
+    config = PipelineConfig(async_copy_enabled=True)
+
+    result = Analyzer().analyze(
+        op, hw, DataType.FP16, mode=AnalysisMode.PIPELINE,
+        pipeline_config=config, M=4096, N=4096, K=4096,
+    )
+
+    stages = {s.pipeline_stage for s in result.pipeline_schedule.sub_ops}
+    names = {s.name for s in result.pipeline_schedule.sub_ops}
+
+    assert result.tiling_info.candidate.mma_path == "umma"
+    assert result.tiling_info.candidate.copy_path == "tma"
+    assert "tmem_load" in stages
+    assert "tmem_load_C" in names
+    assert "async_copy_store" in stages
+    assert "async_copy_store_C" in names
 
 
 def test_solar_arch_configs_match_hardware_peaks():

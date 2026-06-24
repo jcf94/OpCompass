@@ -323,6 +323,8 @@ def api_analyze(body: Dict[str, Any]) -> Dict[str, Any]:
             block_m=pipeline_config_dict.get("block_m"),
             block_n=pipeline_config_dict.get("block_n"),
             block_k=pipeline_config_dict.get("block_k"),
+            stage_count=pipeline_config_dict.get("stage_count"),
+            warp_count=pipeline_config_dict.get("warp_count"),
         )
 
     op = op_cls()
