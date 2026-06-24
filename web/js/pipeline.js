@@ -513,8 +513,15 @@ const PipelineUI = {
         const container = document.getElementById("pipeline-stats-content");
         if (!container || !schedule) return;
 
+        const stageCount = Number(pipelineConfig?.stage_count || 0);
+        const prefetchDistance = (
+            pipelineConfig?.async_copy_enabled && stageCount > 1
+                ? stageCount - 1
+                : 0
+        );
         const rows = [
             ["K Iterations", schedule.num_k_iterations],
+            ["Prefetch Distance", prefetchDistance + " K-slice" + (prefetchDistance === 1 ? "" : "s")],
             ["Grid Size", schedule.grid_size],
             ["Wave Count", schedule.wave_count],
             ["Prologue", schedule.prologue_cycles + " cycles"],
@@ -556,8 +563,6 @@ const PipelineUI = {
 
         const rows = [
             ["Candidate", tilingInfo.candidate_name || "default"],
-            ["Stage Count", tilingInfo.stage_count || "—"],
-            ["Warps/Block", tilingInfo.num_warps_per_block],
             ["Regs/Thread", tilingInfo.registers_per_thread || "—"],
             ["Regs/Block", tilingInfo.registers_per_block || "—"],
             ["Shared Mem", tilingInfo.shared_memory_per_block != null
