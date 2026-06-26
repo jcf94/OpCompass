@@ -43,6 +43,16 @@ function fmtGBps(bw) { return bw ? bw.toFixed(0) + ' GB/s' : '—'; }
 function fmtKB(n) { return n ? n + ' KB' : '—'; }
 function fmtNum(n) { return n ? n.toLocaleString() : '—'; }
 
+function fmtOverviewCapacity(bytes) {
+    const value = Number(bytes || 0);
+    if (!value) return '—';
+    if (value >= 1024 ** 4) return (value / 1024 ** 4).toFixed(1) + ' TB';
+    if (value >= 1024 ** 3) return (value / 1024 ** 3).toFixed(0) + ' GB';
+    if (value >= 1024 ** 2) return (value / 1024 ** 2).toFixed(0) + ' MB';
+    if (value >= 1024) return (value / 1024).toFixed(0) + ' KB';
+    return value + ' B';
+}
+
 function fmtCombinedFlops(...values) {
     const present = values.filter(v => v);
     if (!present.length) return '—';
@@ -65,7 +75,7 @@ function memSummary(hw) {
     const tiers = hw.memory_tiers || [];
     if (tiers.length === 0) return '—';
     const t = tiers[0]; // first tier = main memory
-    const cap = t.capacity_gb >= 1 ? t.capacity_gb.toFixed(0) + ' GB' : (t.capacity_gb * 1000).toFixed(0) + ' MB';
+    const cap = fmtOverviewCapacity(t.capacity_bytes);
     return `${t.name} ${cap} @ ${t.bandwidth_gb_s.toFixed(0)} GB/s`;
 }
 
@@ -74,8 +84,7 @@ function l2Summary(hw) {
     const tiers = hw.memory_tiers || [];
     if (tiers.length < 2) return '—';
     const t = tiers[1]; // second tier = L2
-    const cap = t.capacity_gb >= 1 ? t.capacity_gb.toFixed(0) + ' GB' : (t.capacity_gb * 1000).toFixed(0) + ' MB';
-    return `${cap}`;
+    return fmtOverviewCapacity(t.capacity_bytes);
 }
 
 // ── Rendering ─────────────────────────────────────────────────────

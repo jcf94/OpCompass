@@ -6,6 +6,16 @@
 let operators = [];
 let hardware = [];
 let currentResult = null;
+
+function formatSpecCapacity(bytes) {
+    const value = Number(bytes || 0);
+    if (!value) return '—';
+    if (value >= 1024 ** 4) return (value / 1024 ** 4).toFixed(1) + ' TB';
+    if (value >= 1024 ** 3) return (value / 1024 ** 3).toFixed(0) + ' GB';
+    if (value >= 1024 ** 2) return (value / 1024 ** 2).toFixed(0) + ' MB';
+    if (value >= 1024) return (value / 1024).toFixed(0) + ' KB';
+    return value + ' B';
+}
 let tileConstraints = null;
 
 // ── DOM refs ──────────────────────────────────────────────────
@@ -124,7 +134,7 @@ async function updateHardwareInfo() {
             <p style="margin-bottom:0.5rem;font-family:var(--font-mono);font-size:0.85rem;font-weight:600;color:var(--text-emphasis)">${detail.vendor} ${detail.name.toUpperCase()}</p>
             <div class="spec-row"><span class="spec-label">Compute Units</span><span class="spec-value">${cu.count} ${cu.name}s @ ${cu.clock_mhz} MHz</span></div>
             ${detail.memory_tiers.map(t => `
-                <div class="spec-row"><span class="spec-label">${t.name}</span><span class="spec-value">${t.capacity_gb.toFixed(0)} GB, ${t.bandwidth_gb_s.toFixed(0)} GB/s</span></div>
+                <div class="spec-row"><span class="spec-label">${t.name}</span><span class="spec-value">${formatSpecCapacity(t.capacity_bytes)}, ${t.bandwidth_gb_s.toFixed(0)} GB/s</span></div>
             `).join("")}
             ${peakRows}
         `;
