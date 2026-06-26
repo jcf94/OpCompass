@@ -43,6 +43,23 @@ function fmtGBps(bw) { return bw ? bw.toFixed(0) + ' GB/s' : '—'; }
 function fmtKB(n) { return n ? n + ' KB' : '—'; }
 function fmtNum(n) { return n ? n.toLocaleString() : '—'; }
 
+function fmtCombinedFlops(...values) {
+    const present = values.filter(v => v);
+    if (!present.length) return '—';
+    const first = present[0];
+    const allSame = present.every(v => v === first);
+    if (allSame) return fmtFlops(first);
+    return present.map(v => fmtFlops(v)).join(' / ');
+}
+
+function peakCudaFlops(hw) {
+    const sms = hw.cu_count || 0;
+    const coresPerSm = hw.fp32_cores_per_unit || 0;
+    const clockHz = (hw.clock_mhz || 0) * 1e6;
+    const derived = sms * coresPerSm * 2 * clockHz;
+    return derived || (hw.peak_flops || {}).fp32 || 0;
+}
+
 /** Build a short memory summary string: "HBM3 80 GB @ 3352 GB/s" */
 function memSummary(hw) {
     const tiers = hw.memory_tiers || [];
@@ -83,13 +100,14 @@ function renderOverviewTable() {
         { grp: 'Memory',         key: 'hbm_bandwidth_gb_s', label: 'Mem BW', fmt: v => fmtGBps(v) },
 
         // Group: Peak (Tensor Core dtypes)
+        { grp: 'Peak TC',        key: 'peak_flops',  label: 'FP4',   fmt: (_, hw) => fmtFlops((hw.peak_flops || {}).fp4) },
         { grp: 'Peak TC',        key: 'peak_flops',  label: 'FP8',   fmt: (_, hw) => fmtFlops((hw.peak_flops || {}).fp8) },
-        { grp: 'Peak TC',        key: 'peak_flops',  label: 'FP16 TC', fmt: (_, hw) => fmtFlops((hw.peak_flops || {}).fp16) },
-        { grp: 'Peak TC',        key: 'peak_flops',  label: 'BF16 TC', fmt: (_, hw) => fmtFlops((hw.peak_flops || {}).bf16) },
+        { grp: 'Peak TC',        key: 'peak_flops',  label: 'FP16/BF16', fmt: (_, hw) => fmtCombinedFlops((hw.peak_flops || {}).fp16, (hw.peak_flops || {}).bf16) },
         { grp: 'Peak TC',        key: 'peak_flops',  label: 'TF32 TC', fmt: (_, hw) => fmtFlops((hw.peak_flops || {}).tf32) },
         { grp: 'Peak TC',        key: 'peak_flops',  label: 'INT8 TC', fmt: (_, hw) => fmtFlops((hw.peak_flops || {}).int8) },
 
         // Group: Peak (CUDA core)
+        { grp: 'Peak CUDA',      key: 'peak_flops',  label: 'FP16/BF16', fmt: (_, hw) => fmtFlops(peakCudaFlops(hw)) },
         { grp: 'Peak CUDA',      key: 'peak_flops',  label: 'FP32',  fmt: (_, hw) => fmtFlops((hw.peak_flops || {}).fp32) },
         { grp: 'Peak CUDA',      key: 'peak_flops',  label: 'FP64',  fmt: (_, hw) => fmtFlops((hw.peak_flops || {}).fp64) },
 

@@ -82,6 +82,8 @@ HARDWARE_TO_SOLAR_ARCH: Dict[str, str] = {
     "b300": str(_SOLAR_ARCH_DIR / "B300.yaml"),
     "gb200": str(_SOLAR_ARCH_DIR / "B200.yaml"),  # Same GPU die as B200
     "gb300": str(_SOLAR_ARCH_DIR / "B300.yaml"),  # Same GPU die as B300
+    "jetson-t5000": str(_SOLAR_ARCH_DIR / "Jetson_Thor_T5000.yaml"),
+    "jetson-t4000": str(_SOLAR_ARCH_DIR / "Jetson_Thor_T4000.yaml"),
 }
 
 # Add the built-in SOLAR arch configs for hardware we don't have custom configs for.
@@ -398,7 +400,7 @@ def _dtype_to_solar_precision(dtype: DataType) -> str:
         DataType.BF16: "bf16",
         DataType.INT8: "int8",
         DataType.FP8: "fp8",
-        DataType.FP4: "fp4",
+        DataType.FP4: "nvfp4",
         DataType.INT4: "int4",
     }
     return _map.get(dtype, "fp16")  # type: ignore[arg-type]

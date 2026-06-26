@@ -1141,9 +1141,9 @@ footer {
 #overview-table thead tr:last-child th:nth-child(7),  /* Memory */
 #overview-table thead tr:last-child th:nth-child(10), /* Peak TC */
 #overview-table thead tr:last-child th:nth-child(15), /* Peak CUDA */
-#overview-table thead tr:last-child th:nth-child(17), /* Per SM */
-#overview-table thead tr:last-child th:nth-child(23), /* Occupancy */
-#overview-table thead tr:last-child th:nth-child(26)  /* Features */
+#overview-table thead tr:last-child th:nth-child(18), /* Per SM */
+#overview-table thead tr:last-child th:nth-child(24), /* Occupancy */
+#overview-table thead tr:last-child th:nth-child(27)  /* Features */
 {
   border-left: 2px solid var(--border);
 }
