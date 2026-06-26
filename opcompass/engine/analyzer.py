@@ -252,7 +252,7 @@ class Analyzer:
 
         # Roofline data from pipeline model rather than simple model
         peak_flops = hardware.get_peak_flops(dtype)
-        if pipeline_config.sparsity_2_4_enabled and dtype.value in {"fp16", "bf16", "tf32", "fp8", "int8"}:
+        if pipeline_config.sparsity_2_4_enabled and dtype.value in {"fp16", "bf16", "tf32", "fp8", "fp4", "int8"}:
             peak_flops *= 2
         peak_bw = hardware.hbm_bandwidth
         total_io = read_bytes + write_bytes

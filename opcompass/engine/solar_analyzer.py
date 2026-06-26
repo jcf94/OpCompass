@@ -398,6 +398,7 @@ def _dtype_to_solar_precision(dtype: DataType) -> str:
         DataType.BF16: "bf16",
         DataType.INT8: "int8",
         DataType.FP8: "fp8",
+        DataType.FP4: "fp4",
         DataType.INT4: "int4",
     }
     return _map.get(dtype, "fp16")  # type: ignore[arg-type]

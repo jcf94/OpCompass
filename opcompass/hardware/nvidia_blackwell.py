@@ -629,3 +629,99 @@ class NvidiaGB300(NvidiaBlackwell):
             DataType.INT8:  7500e12,
         },
     )
+
+
+class NvidiaJetsonT5000(NvidiaBlackwell):
+    """NVIDIA Jetson T5000 module — Thor SoC, Blackwell GPU.
+
+    Source: ``docs/hardware/nvidia/jetson-thor-technical-brief.pdf``
+    (TB-12572-001, August 2025), Tables 1-2 and the GPU/Memory sections.
+
+    Brief specs:
+        - 2560-core NVIDIA Blackwell GPU, 10 TPCs, up to 20 SMs
+        - 1.57 GHz GPU max frequency
+        - 128 GB LPDDR5x, 273 GB/s memory bandwidth
+        - 2070 TFLOPS FP4 sparse, 1035 TFLOPS FP4 dense
+        - 517 TFLOPS FP8 dense / INT8 TOPS, 258 TFLOPS FP16 dense
+        - 40 W - 130 W module power
+
+    The brief lists "96 5th GEN Tensor cores" while also saying Thor has
+    four 5th-generation Tensor Cores per SM.  The model keeps the common
+    Blackwell per-SM value of 4 Tensor Cores and uses the official full-module
+    peak performance table for dtype throughput.
+    """
+
+    name = "jetson-t5000"
+    description = "NVIDIA Jetson T5000 — Thor, Blackwell, 20 SM, 258 TFLOPS FP16"
+
+    memory = MemoryHierarchy(
+        tiers=[
+            MemoryTier(
+                name="LPDDR5x",
+                capacity_bytes=128 * 1024**3,
+                bandwidth_bytes_per_sec=273e9,
+            ),
+        ],
+        can_overlap_with_compute={"LPDDR5x"},
+    )
+
+    compute_unit = NvidiaBlackwell._make_compute_unit(
+        count=20,
+        clock_mhz=1570,
+        peak_flops={
+            DataType.FP32: 8.0384e12,    # 20 SM * 128 CUDA cores * 2 ops * 1.57 GHz
+            DataType.TF32: 129e12,       # Derived from Blackwell TF32:FP16 = 1:2
+            DataType.FP16: 258e12,       # Table 2 dense
+            DataType.BF16: 258e12,       # Same Tensor Core rate as FP16
+            DataType.FP8: 517e12,        # Table 2 dense
+            DataType.FP4: 1035e12,       # Table 2 dense; sparse is 2070 TFLOPS
+            DataType.INT8: 517e12,       # Table 2 dense TOPS
+        },
+    )
+
+
+class NvidiaJetsonT4000(NvidiaBlackwell):
+    """NVIDIA Jetson T4000 module — Thor SoC, Blackwell GPU.
+
+    Source: ``docs/hardware/nvidia/jetson-thor-technical-brief.pdf``
+    (TB-12572-001, August 2025), Table 1.  The brief provides T4000's FP4
+    AI performance but only gives a per-precision breakdown for T5000 in
+    Table 2, so non-FP4 Tensor Core peaks are scaled with the same Blackwell
+    ratios used by T5000: FP8/INT8 dense = 1/2 FP4 dense, FP16/BF16 dense =
+    1/4 FP4 dense, TF32 dense = 1/8 FP4 dense.
+
+    Brief specs:
+        - 1536-core NVIDIA Blackwell GPU, 6 TPCs, inferred 12 SMs
+        - 1.57 GHz GPU max frequency
+        - 64 GB LPDDR5x, 273 GB/s memory bandwidth
+        - 1200 TFLOPS FP4 AI performance
+        - 40 W - 90 W module power
+    """
+
+    name = "jetson-t4000"
+    description = "NVIDIA Jetson T4000 — Thor, Blackwell, 12 SM, 150 TFLOPS FP16"
+
+    memory = MemoryHierarchy(
+        tiers=[
+            MemoryTier(
+                name="LPDDR5x",
+                capacity_bytes=64 * 1024**3,
+                bandwidth_bytes_per_sec=273e9,
+            ),
+        ],
+        can_overlap_with_compute={"LPDDR5x"},
+    )
+
+    compute_unit = NvidiaBlackwell._make_compute_unit(
+        count=12,
+        clock_mhz=1570,
+        peak_flops={
+            DataType.FP32: 4.82304e12,   # 12 SM * 128 CUDA cores * 2 ops * 1.57 GHz
+            DataType.TF32: 75e12,        # Derived from FP4 dense ratio
+            DataType.FP16: 150e12,       # Derived from FP4 dense ratio
+            DataType.BF16: 150e12,
+            DataType.FP8: 300e12,
+            DataType.FP4: 600e12,        # Dense; Table 1's 1200 TFLOPS is sparse/effective
+            DataType.INT8: 300e12,
+        },
+    )
