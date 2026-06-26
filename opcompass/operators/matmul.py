@@ -66,6 +66,12 @@ class Matmul(Operator):
         N = dims.get("N", 0)
         K = dims.get("K", 0)
         torch_dtype = _dtype_to_torch_str(dtype)
+        if dtype == DataType.INT8:
+            input_source = f"""    A = torch.randint(-128, 127, (M, K), dtype={torch_dtype})
+    B = torch.randint(-128, 127, (K, N), dtype={torch_dtype})"""
+        else:
+            input_source = f"""    A = torch.randn(M, K, dtype={torch_dtype})
+    B = torch.randn(K, N, dtype={torch_dtype})"""
 
         return f'''import torch
 from torch import nn
@@ -82,8 +88,7 @@ class Model(nn.Module):
 
 def get_inputs():
     M, N, K = {M}, {N}, {K}
-    A = torch.randn(M, K, dtype={torch_dtype})
-    B = torch.randn(K, N, dtype={torch_dtype})
+{input_source}
     return [A, B]
 '''
 

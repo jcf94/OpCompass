@@ -18,7 +18,7 @@ B200 (SXM):
     TDP: 1000 W
 
 B300 "Blackwell Ultra" (SXM):
-    160 SMs, ~1.5× B200 compute throughput
+    160 SMs, higher FP4 Tensor Core throughput than B200
     288 GB HBM3e (12-Hi), 8 TB/s, 64 MB L2
     TDP: 1400 W
 
@@ -68,7 +68,7 @@ Tensor Core details (5th generation)
 Key Blackwell improvements over Hopper (H100)
 ----------------------------------------------
 - 2.3× FP16/BF16 Tensor TFLOPS  (2250 vs 989 on H100 SXM)
-- ~1.3× FP32 CUDA TFLOPS         (90 vs 67 on H100)
+- ~1.1× FP32 CUDA TFLOPS         (75 vs 67 on H100)
 - TMEM — dedicated 256 KB Tensor Memory per SM (new)
 - 2× INT32 cores per SM           (128 vs 64)
 - 2× LD/ST units per SM           (32 vs 16)
@@ -361,7 +361,8 @@ class NvidiaBlackwell(Hardware):
 class NvidiaB200(NvidiaBlackwell):
     """NVIDIA B200 (SXM) — GB100 dual-die GPU, Blackwell architecture.
 
-    Full-chip peak (160 SMs, dual GPU Boost clocks):
+    Full-chip dense peaks, converted from NVIDIA's current HGX B200
+    8-GPU specifications where needed:
         ===========================  ================  ================
         Precision                     Peak (dense)      Effective Clock
         ===========================  ================  ================
@@ -372,7 +373,7 @@ class NvidiaB200(NvidiaBlackwell):
         TF32  Tensor Core             1.125 PFLOPS     @ ~1.72 GHz
         INT8  Tensor Core             4.5  POPS        @ ~1.72 GHz
         FP64  Tensor Core            45    TFLOPS      @ ~1.72 GHz
-        FP32  CUDA Core              90    TFLOPS      @ ~2.2  GHz
+        FP32  CUDA Core              75    TFLOPS
         FP64  CUDA Core              45    TFLOPS      @ ~2.2  GHz
         ===========================  ================  ================
 
@@ -407,30 +408,20 @@ class NvidiaB200(NvidiaBlackwell):
 
     # ── Compute unit ──────────────────────────────────────────────────
 
-    # Canonical clock: 2000 MHz.  TC peak FLOPs are computed at the lower
-    # TC clock (~1716 MHz).  The CUDA core (non-TC) peak is at ~2.2 GHz.
-    #
-    # Peak FLOPs derivations:
-    #   TC @ ~1716 MHz:
-    #     FP16: 160 × 4096 × 2 × 1.716 GHz = 2250 TFLOPS
-    #     FP8:  160 × 8192 × 2 × 1.716 GHz = 4500 TFLOPS
-    #     TF32: 160 × 2048 × 2 × 1.716 GHz = 1125 TFLOPS
-    #     INT8: 160 × 16384   × 1.716 GHz = 4500 TOPS
-    #     FP64: 160 ×  256 × 2 × 1.716 GHz ≈   45 TFLOPS
-    #   CUDA @ ~2.2 GHz:
-    #     FP32: 160 × 128 × 2 × 2.2 GHz   ≈   90 TFLOPS
-    #     FP64: 160 ×  64 × 2 × 2.2 GHz   ≈   45 TFLOPS
+    # Official HGX B200 specs are published as 8-GPU system values. Tensor
+    # Core rows are sparse unless noted; OpCompass records dense per-GPU peaks.
     compute_unit = NvidiaBlackwell._make_compute_unit(
         count=160,
         clock_mhz=2000,
 
         peak_flops={
             DataType.FP64:  45e12,       # CUDA core FP64
-            DataType.FP32:  90e12,       # CUDA core FP32
+            DataType.FP32:  75e12,       # CUDA core FP32
             DataType.TF32:  1125e12,     # TC TF32
             DataType.FP16:  2250e12,     # TC FP16
             DataType.BF16:  2250e12,     # TC BF16
             DataType.FP8:   4500e12,     # TC FP8
+            DataType.FP4:   9000e12,     # TC FP4
             DataType.INT8:  4500e12,     # TC INT8 (TOPS)
         },
     )
@@ -439,22 +430,22 @@ class NvidiaB200(NvidiaBlackwell):
 class NvidiaB300(NvidiaBlackwell):
     """NVIDIA B300 "Blackwell Ultra" (SXM) — Blackwell architecture.
 
-    The B300 is a mid-generation refresh with higher clocks, more memory,
-    and improved FP4 throughput.  Same 160 SMs as B200 but ~1.5× compute.
+    The B300 is a Blackwell Ultra refresh with more memory and higher FP4
+    throughput. Current NVIDIA HGX specifications list the same FP8/FP16/TF32
+    dense rates as B200 and a higher FP4 dense rate.
 
-    Full-chip peak (160 SMs, dual GPU Boost clocks):
+    Full-chip dense peaks, converted from NVIDIA's current HGX B300
+    8-GPU specifications where needed:
         ===========================  ================  ================
         Precision                     Peak (dense)      Effective Clock
         ===========================  ================  ================
-        FP4   Tensor Core            15    PFLOPS      @ ~2.0  GHz
-        FP8   Tensor Core             7.5  PFLOPS      @ ~2.0  GHz
-        FP16  Tensor Core             3.75 PFLOPS      @ ~2.0  GHz
-        BF16  Tensor Core             3.75 PFLOPS      @ ~2.0  GHz
-        TF32  Tensor Core             1.875 PFLOPS     @ ~2.0  GHz
-        INT8  Tensor Core             7.5  POPS        @ ~2.0  GHz
-        FP64  Tensor Core            67    TFLOPS      @ ~2.0  GHz
-        FP32  CUDA Core             135    TFLOPS      @ ~2.2  GHz
-        FP64  CUDA Core              67.5  TFLOPS     @ ~2.2  GHz
+        FP4   Tensor Core            13.5  PFLOPS
+        FP8   Tensor Core             4.5  PFLOPS
+        FP16  Tensor Core             2.25 PFLOPS
+        BF16  Tensor Core             2.25 PFLOPS
+        TF32  Tensor Core             1.125 PFLOPS
+        INT8  Tensor Core             4.5  POPS
+        FP32  CUDA Core              75    TFLOPS
         ===========================  ================  ================
 
     Memory: 288 GB HBM3e (8 × 36 GB, 12-Hi stacks), 8 TB/s, 64 MB L2
@@ -465,7 +456,7 @@ class NvidiaB300(NvidiaBlackwell):
     """
 
     name = "b300"
-    description = "NVIDIA B300 288GB SXM — Blackwell Ultra, 160 SM, 3750 TFLOPS FP16"
+    description = "NVIDIA B300 288GB SXM — Blackwell Ultra, 160 SM, 2250 TFLOPS FP16"
 
     # ── Memory hierarchy ──────────────────────────────────────────────
 
@@ -487,29 +478,21 @@ class NvidiaB300(NvidiaBlackwell):
 
     # ── Compute unit ──────────────────────────────────────────────────
 
-    # Canonical clock: 2200 MHz.  TC peak FLOPs at ~2.0 GHz (~1.5× B200).
-    #
-    # Peak FLOPs derivations:
-    #   TC @ ~2.0 GHz:
-    #     FP16: 160 × 4096 × 2 × 2.0 GHz = 2621 TFLOPS (base)
-    #           With architectural improvements ≈ 3750 TFLOPS (1.5× B200)
-    #     FP8:  2 × FP16 = 7500 TFLOPS
-    #     FP4:  4 × FP16 = 15000 TFLOPS
-    #     INT8: same as FP8 rate = 7500 TOPS
-    #   CUDA @ ~2.2 GHz:
-    #     FP32: 160 × 128 × 2 × 2.2 GHz ≈ 135 TFLOPS
+    # Official HGX B300 specs are published as 8-GPU system values. Tensor
+    # Core rows are sparse unless noted; OpCompass records dense per-GPU peaks.
     compute_unit = NvidiaBlackwell._make_compute_unit(
         count=160,
         clock_mhz=2200,
 
         peak_flops={
-            DataType.FP64:  67.5e12,     # CUDA core FP64  (1.5× B200)
-            DataType.FP32:  135e12,      # CUDA core FP32  (1.5× B200)
-            DataType.TF32:  1875e12,     # TC TF32          (½ of FP16)
-            DataType.FP16:  3750e12,     # TC FP16          (1.5× B200)
-            DataType.BF16:  3750e12,     # TC BF16
-            DataType.FP8:   7500e12,     # TC FP8           (2× FP16)
-            DataType.INT8:  7500e12,     # TC INT8 (TOPS)
+            DataType.FP64:  45e12,       # CUDA core FP64
+            DataType.FP32:  75e12,       # CUDA core FP32
+            DataType.TF32:  1125e12,     # TC TF32
+            DataType.FP16:  2250e12,     # TC FP16
+            DataType.BF16:  2250e12,     # TC BF16
+            DataType.FP8:   4500e12,     # TC FP8
+            DataType.FP4:   13500e12,    # TC FP4
+            DataType.INT8:  4500e12,     # TC INT8 (TOPS)
         },
     )
 
@@ -528,7 +511,7 @@ class NvidiaGB200(NvidiaBlackwell):
     (148 SMs).  Here both are modelled with 160 SMs.
 
     Superchip totals (for reference):
-        FP4  TC: 18 PFLOPS (2 GPUs)
+        FP4  TC: 18 PFLOPS (2 GPUs, dense)
         FP16 TC:  4.5 PFLOPS
         Memory: 384 GB HBM3e (192 GB × 2 GPUs)
         TDP: ~2700 W
@@ -565,11 +548,12 @@ class NvidiaGB200(NvidiaBlackwell):
 
         peak_flops={
             DataType.FP64:  45e12,
-            DataType.FP32:  90e12,
+            DataType.FP32:  75e12,
             DataType.TF32:  1125e12,
             DataType.FP16:  2250e12,
             DataType.BF16:  2250e12,
             DataType.FP8:   4500e12,
+            DataType.FP4:   9000e12,
             DataType.INT8:  4500e12,
         },
     )
@@ -580,18 +564,18 @@ class NvidiaGB300(NvidiaBlackwell):
 
     The GB300 Superchip contains one Grace CPU and two B300-class GPUs.
     From a single-GPU analysis perspective the compute unit is identical
-    to the standalone B300: 160 SMs, ~3.75 PFLOPS FP16, 288 GB HBM3e
+    to the standalone B300: 160 SMs, 2.25 PFLOPS FP16, 288 GB HBM3e
     at 8 TB/s.
 
     Superchip totals (for reference):
-        FP4  TC: 30 PFLOPS (2 GPUs)
-        FP16 TC:  7.5 PFLOPS
+        FP4  TC: 27 PFLOPS (2 GPUs, dense)
+        FP16 TC:  4.5 PFLOPS
         Memory: 576 GB HBM3e (288 GB × 2 GPUs)
         TDP: ~3000 W
     """
 
     name = "gb300"
-    description = "NVIDIA GB300 Superchip GPU — Blackwell Ultra, 160 SM, 3750 TFLOPS FP16"
+    description = "NVIDIA GB300 Superchip GPU — Blackwell Ultra, 160 SM, 2250 TFLOPS FP16"
 
     # ── Memory hierarchy ──────────────────────────────────────────────
     # Same as B300 — single GPU perspective.
@@ -620,13 +604,14 @@ class NvidiaGB300(NvidiaBlackwell):
         clock_mhz=2200,
 
         peak_flops={
-            DataType.FP64:  67.5e12,
-            DataType.FP32:  135e12,
-            DataType.TF32:  1875e12,
-            DataType.FP16:  3750e12,
-            DataType.BF16:  3750e12,
-            DataType.FP8:   7500e12,
-            DataType.INT8:  7500e12,
+            DataType.FP64:  45e12,
+            DataType.FP32:  75e12,
+            DataType.TF32:  1125e12,
+            DataType.FP16:  2250e12,
+            DataType.BF16:  2250e12,
+            DataType.FP8:   4500e12,
+            DataType.FP4:   13500e12,
+            DataType.INT8:  4500e12,
         },
     )
 
@@ -641,18 +626,18 @@ class NvidiaJetsonT5000(NvidiaBlackwell):
         - 2560-core NVIDIA Blackwell GPU, 10 TPCs, up to 20 SMs
         - 1.57 GHz GPU max frequency
         - 128 GB LPDDR5x, 273 GB/s memory bandwidth
-        - 2070 TFLOPS FP4 sparse, 1035 TFLOPS FP4 dense
-        - 517 TFLOPS FP8 dense / INT8 TOPS, 258 TFLOPS FP16 dense
+        - 12 MB L2 cache estimate from the upstream SOLAR Jetson Thor config
+        - NVIDIA publishes 2070 TFLOPS FP4 sparse AI performance; OpCompass
+          records 1035 TFLOPS FP4 dense and derives FP8/FP16/TF32 by the
+          usual Blackwell Tensor Core ratios
         - 40 W - 130 W module power
 
-    The brief lists "96 5th GEN Tensor cores" while also saying Thor has
-    four 5th-generation Tensor Cores per SM.  The model keeps the common
-    Blackwell per-SM value of 4 Tensor Cores and uses the official full-module
-    peak performance table for dtype throughput.
+    FP32 throughput is derived from the published CUDA core count and GPU max
+    frequency: 2560 cores × 2 FLOPs/FMA × 1.57 GHz.
     """
 
     name = "jetson-t5000"
-    description = "NVIDIA Jetson T5000 — Thor, Blackwell, 20 SM, 258 TFLOPS FP16"
+    description = "NVIDIA Jetson T5000 — Thor, Blackwell, 20 SM, 258.75 TFLOPS FP16"
 
     memory = MemoryHierarchy(
         tiers=[
@@ -660,6 +645,11 @@ class NvidiaJetsonT5000(NvidiaBlackwell):
                 name="LPDDR5x",
                 capacity_bytes=128 * 1024**3,
                 bandwidth_bytes_per_sec=273e9,
+            ),
+            MemoryTier(
+                name="L2",
+                capacity_bytes=12 * 1024**2,
+                bandwidth_bytes_per_sec=400.35e9,
             ),
         ],
         can_overlap_with_compute={"LPDDR5x"},
@@ -669,13 +659,13 @@ class NvidiaJetsonT5000(NvidiaBlackwell):
         count=20,
         clock_mhz=1570,
         peak_flops={
-            DataType.FP32: 8.0384e12,    # 20 SM * 128 CUDA cores * 2 ops * 1.57 GHz
-            DataType.TF32: 129e12,       # Derived from Blackwell TF32:FP16 = 1:2
-            DataType.FP16: 258e12,       # Table 2 dense
-            DataType.BF16: 258e12,       # Same Tensor Core rate as FP16
-            DataType.FP8: 517e12,        # Table 2 dense
-            DataType.FP4: 1035e12,       # Table 2 dense; sparse is 2070 TFLOPS
-            DataType.INT8: 517e12,       # Table 2 dense TOPS
+            DataType.FP32: 8.0384e12,        # CUDA core FP32
+            DataType.TF32: 129.375e12,       # Derived dense TF32 TC
+            DataType.FP16: 258.75e12,        # Derived dense FP16 TC
+            DataType.BF16: 258.75e12,        # same as FP16
+            DataType.FP8: 517.5e12,          # Derived dense FP8 TC
+            DataType.FP4: 1035e12,           # Dense FP4 TC
+            DataType.INT8: 517.5e12,         # Derived dense INT8 TC
         },
     )
 
@@ -684,18 +674,20 @@ class NvidiaJetsonT4000(NvidiaBlackwell):
     """NVIDIA Jetson T4000 module — Thor SoC, Blackwell GPU.
 
     Source: ``docs/hardware/nvidia/jetson-thor-technical-brief.pdf``
-    (TB-12572-001, August 2025), Table 1.  The brief provides T4000's FP4
-    AI performance but only gives a per-precision breakdown for T5000 in
-    Table 2, so non-FP4 Tensor Core peaks are scaled with the same Blackwell
-    ratios used by T5000: FP8/INT8 dense = 1/2 FP4 dense, FP16/BF16 dense =
-    1/4 FP4 dense, TF32 dense = 1/8 FP4 dense.
+    (TB-12572-001, August 2025), Table 1.  No upstream SOLAR config is
+    provided for T4000, so it is derived from the NVIDIA-provided T5000 SOLAR
+    config. NVIDIA publishes 1200 TFLOPS FP4 sparse AI performance; OpCompass
+    records 600 TFLOPS FP4 dense and derives FP8/FP16/TF32 by the usual
+    Blackwell Tensor Core ratios. FP32 throughput is derived from the published
+    CUDA core count and GPU max frequency.
 
     Brief specs:
         - 1536-core NVIDIA Blackwell GPU, 6 TPCs, inferred 12 SMs
-        - 1.57 GHz GPU max frequency
+        - 1.53 GHz GPU max frequency
         - 64 GB LPDDR5x, 273 GB/s memory bandwidth
-        - 1200 TFLOPS FP4 AI performance
-        - 40 W - 90 W module power
+        - 7.2 MB L2 cache estimate, scaled from the upstream T5000 SOLAR config
+        - 600 TFLOPS dense FP4 AI performance
+        - 40 W - 70 W module power
     """
 
     name = "jetson-t4000"
@@ -708,20 +700,25 @@ class NvidiaJetsonT4000(NvidiaBlackwell):
                 capacity_bytes=64 * 1024**3,
                 bandwidth_bytes_per_sec=273e9,
             ),
+            MemoryTier(
+                name="L2",
+                capacity_bytes=round(12 * 1024**2 * 12 / 20),
+                bandwidth_bytes_per_sec=234.09e9,
+            ),
         ],
         can_overlap_with_compute={"LPDDR5x"},
     )
 
     compute_unit = NvidiaBlackwell._make_compute_unit(
         count=12,
-        clock_mhz=1570,
+        clock_mhz=1530,
         peak_flops={
-            DataType.FP32: 4.82304e12,   # 12 SM * 128 CUDA cores * 2 ops * 1.57 GHz
-            DataType.TF32: 75e12,        # Derived from FP4 dense ratio
-            DataType.FP16: 150e12,       # Derived from FP4 dense ratio
+            DataType.FP32: 4.70016e12,
+            DataType.TF32: 75e12,
+            DataType.FP16: 150e12,
             DataType.BF16: 150e12,
             DataType.FP8: 300e12,
-            DataType.FP4: 600e12,        # Dense; Table 1's 1200 TFLOPS is sparse/effective
+            DataType.FP4: 600e12,
             DataType.INT8: 300e12,
         },
     )

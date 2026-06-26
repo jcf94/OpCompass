@@ -1,17 +1,18 @@
 # NVIDIA Jetson T4000 module (Thor SoC, Blackwell GPU)
-# Values are derived from docs/hardware/nvidia/jetson-thor-technical-brief.pdf
-# TB-12572-001, Table 1, plus OpCompass dense peak definitions.
+# Values use NVIDIA's current Jetson Thor product specifications.
+# NVIDIA publishes 1200 TFLOPS FP4 sparse; OpCompass records dense peaks.
+# FP8/FP16/TF32 are derived from the usual Blackwell Tensor Core ratios.
 name: "Jetson_Thor_T4000"
-SRAM_capacity: 7549747  # L2 estimate scaled from T5000 by 12/20 SMs; brief does not publish L2
-SRAM_byte_per_cycle: 153  # L2 bandwidth estimate scaled from T5000 by 12/20 SMs
+SRAM_capacity: 7549747  # 12 MB * 12 / 20
+SRAM_byte_per_cycle: 153  # 255 * 12 / 20, approximate
 DRAM_capacity: 68719476736  # 64 GB LPDDR5x
-DRAM_byte_per_cycle: 173.88535031847132  # 273 GB/s at 1.57 GHz
-freq_GHz: 1.57
-MAC_per_cycle_fp32_sm: 1536.0  # 4.82304 TFLOPS FP32 CUDA core peak
-MAC_per_cycle_tf32_tc: 23885.350318471337  # 75 TFLOPS TF32, derived from FP4 dense ratio
-MAC_per_cycle_fp16_tc: 47770.700636942674  # 150 TFLOPS FP16 dense, derived
-MAC_per_cycle_bf16_tc: 47770.700636942674  # same Tensor Core rate as FP16
-MAC_per_cycle_fp8_tc: 95541.40127388535  # 300 TFLOPS FP8 dense, derived
-MAC_per_cycle_int8_tc: 95541.40127388535  # 300 TOPS INT8 dense, derived
-MAC_per_cycle_fp4_tc: 191082.8025477707  # 600 TFLOPS FP4 dense; Table 1 gives 1200 sparse/effective
-MAC_per_cycle_nvfp4_tc: 191082.8025477707  # SOLAR normalizes FP4 precision to nvfp4
+DRAM_byte_per_cycle: 178.4313725490196  # 273 GB/s at 1.53 GHz
+freq_GHz: 1.53
+MAC_per_cycle_fp32_sm: 1536  # 1536 CUDA cores @ 1.53 GHz, MAC = 2 FLOPs
+MAC_per_cycle_tf32_tc: 24509.803921568626  # 75 TFLOPS TF32 derived
+MAC_per_cycle_fp16_tc: 49019.60784313725  # 150 TFLOPS FP16 derived
+MAC_per_cycle_bf16_tc: 49019.60784313725  # Same as FP16
+MAC_per_cycle_fp8_tc: 98039.2156862745  # 300 TFLOPS FP8 derived
+MAC_per_cycle_int8_tc: 98039.2156862745  # 300 TOPS INT8 derived
+MAC_per_cycle_fp4_tc: 196078.431372549  # 600 TFLOPS FP4 dense (1200 sparse / 2)
+MAC_per_cycle_nvfp4_tc: 196078.431372549
