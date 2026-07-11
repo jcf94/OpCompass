@@ -125,7 +125,9 @@ def api_hardware_overview() -> List[Dict[str, Any]]:
                 {
                     "name": t.name,
                     "capacity_gb": t.capacity_bytes / 1e9,
+                    "capacity_bytes": t.capacity_bytes,
                     "bandwidth_gb_s": t.bandwidth_bytes_per_sec / 1e9,
+                    "bandwidth_bytes_per_sec": t.bandwidth_bytes_per_sec,
                 }
                 for t in inst.memory.tiers
             ],

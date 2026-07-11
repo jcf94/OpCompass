@@ -1,15 +1,17 @@
 # NVIDIA B300 "Blackwell Ultra" — 288 GB HBM3e SKU
-# Mid-generation refresh with higher clocks, more memory, and improved FP4.
-# Same 160 SM dual-die configuration as B200.
+# Values use NVIDIA's current HGX B300 specifications, converted from
+# 8-GPU sparse system peaks to per-GPU dense peaks where needed.
 name: "B300"
 SRAM_capacity: 67108864  # 64 MB L2 cache
 SRAM_byte_per_cycle: 6000  # ~12 TB/s L2 aggregate bandwidth at ~2.0 GHz
 DRAM_capacity: 309237645312  # 288 GB HBM3e (12-Hi stacks)
 DRAM_byte_per_cycle: 4000  # 8 TB/s at 2.0 GHz
 freq_GHz: 2.0
-MAC_per_cycle_fp32_sm: 33750  # 135 TFLOPS FP32 (CUDA cores) — MAC = 2 FLOPs
-MAC_per_cycle_fp16_tc: 937500  # 3750 TFLOPS FP16 (Tensor Cores) — MAC = 2 FLOPs
-MAC_per_cycle_bf16_tc: 937500  # 3750 TFLOPS BF16 (Tensor Cores) — MAC = 2 FLOPs
-MAC_per_cycle_tf32_tc: 468750  # 1875 TFLOPS TF32 (Tensor Cores) — MAC = 2 FLOPs
-MAC_per_cycle_fp8_tc: 1875000  # 7500 TFLOPS FP8 (Tensor Cores) — MAC = 2 FLOPs
-MAC_per_cycle_int8_tc: 1875000  # 7500 TOPS INT8 (Tensor Cores) — MAC = 2 OPs
+MAC_per_cycle_fp32_sm: 18750  # 75 TFLOPS FP32 (CUDA cores) — MAC = 2 FLOPs
+MAC_per_cycle_fp16_tc: 562500  # 2250 TFLOPS FP16 (Tensor Cores) — MAC = 2 FLOPs
+MAC_per_cycle_bf16_tc: 562500  # 2250 TFLOPS BF16 (Tensor Cores) — MAC = 2 FLOPs
+MAC_per_cycle_tf32_tc: 281250  # 1125 TFLOPS TF32 (Tensor Cores) — MAC = 2 FLOPs
+MAC_per_cycle_fp8_tc: 1125000  # 4500 TFLOPS FP8 (Tensor Cores) — MAC = 2 FLOPs
+MAC_per_cycle_int8_tc: 1125000  # 4500 TOPS INT8 (Tensor Cores) — MAC = 2 OPs
+MAC_per_cycle_fp4_tc: 3375000  # 13500 TFLOPS FP4 (Tensor Cores) — MAC = 2 FLOPs
+MAC_per_cycle_nvfp4_tc: 3375000  # Same FP4 dense peak

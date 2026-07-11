@@ -92,6 +92,46 @@ def _has_solar_deps():
         return False
 
 
+def _solar_matmul_comparison_cases():
+    """Return hardware/dtype pairs supported by both OpCompass and SOLAR configs."""
+    if not _has_solar_deps():
+        return [pytest.param("a100", DataType.FP16, marks=pytest.mark.skip(reason="torch/torchview/pyyaml not installed"))]
+
+    import yaml
+
+    from opcompass.engine.solar_analyzer import HARDWARE_TO_SOLAR_ARCH
+
+    dtype_keys = {
+        DataType.FP32: ("MAC_per_cycle_fp32_tc", "MAC_per_cycle_fp32_sm"),
+        DataType.TF32: ("MAC_per_cycle_tf32_tc",),
+        DataType.FP16: ("MAC_per_cycle_fp16_tc",),
+        DataType.BF16: ("MAC_per_cycle_bf16_tc",),
+        DataType.FP8: ("MAC_per_cycle_fp8_tc",),
+        DataType.FP4: ("MAC_per_cycle_fp4_tc", "MAC_per_cycle_nvfp4_tc"),
+        DataType.INT8: ("MAC_per_cycle_int8_tc",),
+    }
+
+    cases = []
+    for hardware_name, arch_path in sorted(HARDWARE_TO_SOLAR_ARCH.items()):
+        try:
+            hardware_cls = get_hardware(hardware_name)
+        except KeyError:
+            continue
+
+        hw = hardware_cls()
+        with open(arch_path) as f:
+            arch = yaml.safe_load(f)
+
+        for dtype, keys in dtype_keys.items():
+            if dtype not in hw.compute_unit.peak_flops:
+                continue
+            if not any(key in arch for key in keys):
+                continue
+            cases.append(pytest.param(hardware_name, dtype, id=f"{hardware_name}-{dtype.value}"))
+
+    return cases
+
+
 def test_matmul_solar_model_source():
     """Verify that Matmul generates correct SOLAR model source."""
     from opcompass.models import DataType
@@ -159,6 +199,35 @@ def test_matmul_solar_a100_end_to_end():
     assert result.solar_data.fused_prefetched_runtime_ms <= result.solar_data.unfused_runtime_ms
     assert result.sol_time_s > 0
     assert result.sol_tflops > 0
+
+
+@pytest.mark.skipif(not _has_solar_deps(), reason="torch/torchview/pyyaml not installed")
+@pytest.mark.parametrize("hardware_name,dtype", _solar_matmul_comparison_cases())
+def test_matmul_hierarchy_roofline_matches_solar_across_hardware_and_dtypes(hardware_name, dtype):
+    """Matmul should produce nearly identical roofline results in hierarchy and SOLAR modes."""
+    op = get_operator("matmul")()
+    hw = get_hardware(hardware_name)()
+    analyzer = Analyzer()
+    dims = {"M": 128, "N": 128, "K": 128}
+
+    hierarchy = analyzer.analyze(
+        op, hw, dtype, mode=AnalysisMode.HIERARCHY_ROOFLINE, **dims
+    )
+    solar = analyzer.analyze(
+        op, hw, dtype, mode=AnalysisMode.SOLAR, **dims
+    )
+
+    assert solar.total_flops == hierarchy.total_flops
+    assert solar.total_read_bytes == pytest.approx(hierarchy.total_read_bytes, rel=1e-12)
+    assert solar.total_write_bytes == pytest.approx(hierarchy.total_write_bytes, rel=1e-12)
+    assert solar.roofline_data["peak_flops"] == pytest.approx(
+        hierarchy.roofline_data["peak_flops"], rel=2e-3
+    )
+    assert solar.roofline_data["peak_bandwidth"] == pytest.approx(
+        hierarchy.roofline_data["peak_bandwidth"], rel=2e-3
+    )
+    assert solar.sol_time_s == pytest.approx(hierarchy.sol_time_s, rel=2e-3)
+    assert solar.sol_tflops == pytest.approx(hierarchy.sol_tflops, rel=2e-3)
 
 
 @pytest.mark.skipif(not _has_solar_deps(), reason="torch/torchview/pyyaml not installed")

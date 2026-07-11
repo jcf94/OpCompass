@@ -82,6 +82,8 @@ HARDWARE_TO_SOLAR_ARCH: Dict[str, str] = {
     "b300": str(_SOLAR_ARCH_DIR / "B300.yaml"),
     "gb200": str(_SOLAR_ARCH_DIR / "B200.yaml"),  # Same GPU die as B200
     "gb300": str(_SOLAR_ARCH_DIR / "B300.yaml"),  # Same GPU die as B300
+    "jetson-t5000": str(_SOLAR_ARCH_DIR / "Jetson_Thor_T5000.yaml"),
+    "jetson-t4000": str(_SOLAR_ARCH_DIR / "Jetson_Thor_T4000.yaml"),
 }
 
 # Add the built-in SOLAR arch configs for hardware we don't have custom configs for.
@@ -173,8 +175,13 @@ class SolarAnalyzer:
         else:
             read_bytes, write_bytes = 0, 0
 
-        # Time derived from SOLAR's cycle counts (unfused model)
-        unfused_compute = solar_data.unfused_compute_cycles
+        # Time derived from SOLAR's unfused model.  Recompute cycles from
+        # MAC/cycle as float because SOLAR serializes compute_cycles as an int;
+        # one-cycle truncation is visible in small matmul comparison tests.
+        unfused_compute = (
+            solar_data.total_macs / solar_data.arch_mac_per_cycle
+            if solar_data.arch_mac_per_cycle > 0 else 0.0
+        )
         unfused_memory_cycles = (solar_data.unfused_memory_bytes /
                                  solar_data.arch_dram_bw_per_cycle
                                  if solar_data.arch_dram_bw_per_cycle > 0 else 0)
@@ -188,8 +195,15 @@ class SolarAnalyzer:
         else:
             mem_read_time, mem_write_time = 0.0, 0.0
 
-        # SOL time from fused_prefetched (best case)
-        sol_time_s = solar_data.fused_prefetched_runtime_ms / 1000.0 if solar_data.fused_prefetched_runtime_ms > 0 else 0.0
+        # Synthesize the top-level SOL time with the same phase-overlap rule
+        # used by HIERARCHY_ROOFLINE.  Keep SOLAR's fused/fused_prefetched
+        # runtimes in solar_data for detailed reporting; AnalysisResult.sol_* is
+        # the cross-mode comparable roofline estimate.
+        overlap = hardware.memory.can_overlap_with_compute
+        if overlap:
+            sol_time_s = max(compute_time, mem_read_time, mem_write_time)
+        else:
+            sol_time_s = mem_read_time + compute_time + mem_write_time
         sol_tflops = (total_flops / sol_time_s / 1e12) if sol_time_s > 0 else float("inf")
 
         # Roofline data also derived from SOLAR
@@ -398,6 +412,7 @@ def _dtype_to_solar_precision(dtype: DataType) -> str:
         DataType.BF16: "bf16",
         DataType.INT8: "int8",
         DataType.FP8: "fp8",
+        DataType.FP4: "nvfp4",
         DataType.INT4: "int4",
     }
     return _map.get(dtype, "fp16")  # type: ignore[arg-type]

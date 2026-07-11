@@ -484,6 +484,8 @@ def test_solar_arch_configs_match_hardware_peaks():
         "h100_pcie": "H100_PCIe.yaml",
         "b200": "B200.yaml",
         "b300": "B300.yaml",
+        "jetson-t5000": "Jetson_Thor_T5000.yaml",
+        "jetson-t4000": "Jetson_Thor_T4000.yaml",
     }
     dtype_keys = {
         DataType.FP32: "MAC_per_cycle_fp32_sm",
@@ -491,6 +493,7 @@ def test_solar_arch_configs_match_hardware_peaks():
         DataType.FP16: "MAC_per_cycle_fp16_tc",
         DataType.BF16: "MAC_per_cycle_bf16_tc",
         DataType.FP8: "MAC_per_cycle_fp8_tc",
+        DataType.FP4: "MAC_per_cycle_fp4_tc",
         DataType.INT8: "MAC_per_cycle_int8_tc",
     }
 

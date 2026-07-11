@@ -4,7 +4,7 @@ name: "H100_PCIe"
 SRAM_capacity: 52428800  # 50 MB L2 cache
 SRAM_byte_per_cycle: 10000  # ~20 TB/s L2 aggregate bandwidth
 DRAM_capacity: 85899345920  # 80 GB HBM2e
-DRAM_byte_per_cycle: 1019.4  # 2.0 TB/s at 2 GHz
+DRAM_byte_per_cycle: 1000  # 2.0 TB/s at 2 GHz
 freq_GHz: 2
 MAC_per_cycle_fp32_sm: 12800  # 51.2 TFLOPS FP32 (CUDA cores) — MAC = 2 FLOPs
 MAC_per_cycle_fp16_tc: 189000  # 756 TFLOPS FP16 (Tensor Cores) — MAC = 2 FLOPs

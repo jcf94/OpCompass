@@ -15,6 +15,16 @@ const $pipelineLegend = document.getElementById('pipeline-legend');
 // ── Cached detail ─────────────────────────────────────────────────
 let hwDetail = null;
 
+function formatHardwareCapacity(bytes) {
+    const value = Number(bytes || 0);
+    if (!value) return '—';
+    if (value >= 1024 ** 4) return `${(value / 1024 ** 4).toFixed(1)} TB`;
+    if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(0)} GB`;
+    if (value >= 1024 ** 2) return `${(value / 1024 ** 2).toFixed(0)} MB`;
+    if (value >= 1024) return `${(value / 1024).toFixed(0)} KB`;
+    return `${value} B`;
+}
+
 // ── Initialization ────────────────────────────────────────────────
 async function initHardwarePage() {
     try {
@@ -90,9 +100,7 @@ function renderMemoryHierarchy() {
     const allTiers = [
         ...tiers.map(t => ({
             name: t.name,
-            cap: t.capacity_gb >= 1
-                ? `${t.capacity_gb.toFixed(1)} GB`
-                : `${(t.capacity_gb * 1000).toFixed(0)} MB`,
+            cap: formatHardwareCapacity(t.capacity_bytes),
             bw: t.bandwidth_gb_s >= 1000
                 ? `${(t.bandwidth_gb_s / 1000).toFixed(1)} TB/s`
                 : `${t.bandwidth_gb_s.toFixed(0)} GB/s`,

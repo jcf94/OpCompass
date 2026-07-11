@@ -1,0 +1,18 @@
+# NVIDIA Jetson T5000 module (Thor SoC, Blackwell GPU)
+# Values use NVIDIA's current Jetson Thor product specifications.
+# NVIDIA publishes 2070 TFLOPS FP4 sparse; OpCompass records dense peaks.
+# FP8/FP16/TF32 are derived from the usual Blackwell Tensor Core ratios.
+name: "Jetson_Thor_T5000"
+SRAM_capacity: 12582912  # 12 MB L2 estimate from upstream SOLAR config
+SRAM_byte_per_cycle: 255  # ~400 GB/s at 1.57 GHz
+DRAM_capacity: 137438953472  # 128 GB LPDDR5x
+DRAM_byte_per_cycle: 173.9  # 273 GB/s at 1.57 GHz
+freq_GHz: 1.57
+MAC_per_cycle_fp32_sm: 2560  # 2560 CUDA cores @ 1.57 GHz, MAC = 2 FLOPs
+MAC_per_cycle_tf32_tc: 41202.229299363054  # 129.375 TFLOPS TF32 derived
+MAC_per_cycle_fp16_tc: 82404.45859872611  # 258.75 TFLOPS FP16 derived
+MAC_per_cycle_bf16_tc: 82404.45859872611  # Same as FP16
+MAC_per_cycle_fp8_tc: 164808.91719745222  # 517.5 TFLOPS FP8 derived
+MAC_per_cycle_int8_tc: 164808.91719745222  # 517.5 TOPS INT8 derived
+MAC_per_cycle_fp4_tc: 329617.83439490444  # 1035 TFLOPS FP4 dense (2070 sparse / 2)
+MAC_per_cycle_nvfp4_tc: 329617.83439490444

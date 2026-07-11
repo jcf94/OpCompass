@@ -18,6 +18,9 @@ def _dtype_to_torch_str(dtype: DataType) -> str:
         DataType.BF16: "torch.bfloat16",
         DataType.INT8: "torch.int8",
         DataType.FP8: "torch.float8_e4m3fn",
+        # PyTorch does not expose a stable FP4 tensor dtype here; keep SOLAR
+        # source generation usable by falling back to FP16 storage.
+        DataType.FP4: "torch.float16",
     }
     return _map.get(dtype, "torch.float16")
 
@@ -63,6 +66,12 @@ class Matmul(Operator):
         N = dims.get("N", 0)
         K = dims.get("K", 0)
         torch_dtype = _dtype_to_torch_str(dtype)
+        if dtype == DataType.INT8:
+            input_source = f"""    A = torch.randint(-128, 127, (M, K), dtype={torch_dtype})
+    B = torch.randint(-128, 127, (K, N), dtype={torch_dtype})"""
+        else:
+            input_source = f"""    A = torch.randn(M, K, dtype={torch_dtype})
+    B = torch.randn(K, N, dtype={torch_dtype})"""
 
         return f'''import torch
 from torch import nn
@@ -79,8 +88,7 @@ class Model(nn.Module):
 
 def get_inputs():
     M, N, K = {M}, {N}, {K}
-    A = torch.randn(M, K, dtype={torch_dtype})
-    B = torch.randn(K, N, dtype={torch_dtype})
+{input_source}
     return [A, B]
 '''
 
@@ -125,7 +133,7 @@ def get_inputs():
         elif dtype in (DataType.INT8, DataType.FP8):
             granularity = (16, 8, 32)
             instruction = "mma_m16n8k32"
-        elif dtype == DataType.INT4:
+        elif dtype in (DataType.FP4, DataType.INT4):
             granularity = (16, 8, 64)
             instruction = "mma_m16n8k64"
         else:
@@ -275,7 +283,7 @@ def get_inputs():
                 return [(128, 128, 32), (64, 128, 32), (128, 64, 32)]
             return [(128, 128, 64), (128, 256, 64), (256, 128, 64)]
         if arch == "blackwell":
-            if dtype in (DataType.FP16, DataType.BF16, DataType.FP8):
+            if dtype in (DataType.FP16, DataType.BF16, DataType.FP8, DataType.FP4):
                 return [(256, 128, 64), (128, 128, 64), (256, 256, 64)]
             if dtype == DataType.TF32:
                 return [(128, 128, 64), (128, 256, 64), (256, 128, 64)]

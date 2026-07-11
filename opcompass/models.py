@@ -17,6 +17,7 @@ class DataType(str, Enum):
     BF16 = "bf16"
     INT8 = "int8"
     FP8 = "fp8"
+    FP4 = "fp4"
     INT4 = "int4"
 
     @property
@@ -30,6 +31,7 @@ class DataType(str, Enum):
             DataType.BF16: 2,
             DataType.INT8: 1,
             DataType.FP8: 1,
+            DataType.FP4: 0.5,
             DataType.INT4: 0.5,
         }
         return _sizes[self]
