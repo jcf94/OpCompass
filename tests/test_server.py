@@ -140,6 +140,22 @@ def test_analyze_api_returns_stable_infeasible_candidate_error():
     assert "multiple of 16" in exc_info.value.detail["message"]
 
 
+def test_analyze_api_returns_stable_unsupported_dtype_error():
+    with pytest.raises(HTTPException) as exc_info:
+        api_analyze({
+            "operator": "matmul",
+            "hardware": "a100",
+            "dtype": "fp8",
+            "dims": {"M": 128, "N": 128, "K": 128},
+        })
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail["code"] == "unsupported_dtype"
+    assert exc_info.value.detail["hardware"] == "a100"
+    assert exc_info.value.detail["dtype"] == "fp8"
+    assert "fp16" in exc_info.value.detail["supported_dtypes"]
+
+
 def test_analyze_api_pipeline_trace_is_opt_in_and_bounded():
     body = {
         "operator": "matmul",

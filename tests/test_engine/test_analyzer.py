@@ -68,6 +68,21 @@ def test_analyzer_rejects_non_finite_success_result():
     assert exc_info.value.field_path == "result.sol_time_s"
 
 
+def test_analyzer_rejects_unsupported_hardware_dtype_before_modeling():
+    from opcompass.models import UnsupportedDataTypeError
+
+    with pytest.raises(UnsupportedDataTypeError) as exc_info:
+        Analyzer().analyze(
+            get_operator("matmul")(), get_hardware("a100")(), DataType.FP8,
+            M=128, N=128, K=128,
+        )
+
+    assert exc_info.value.code == "unsupported_dtype"
+    assert exc_info.value.hardware == "a100"
+    assert exc_info.value.dtype == DataType.FP8
+    assert DataType.FP16 in exc_info.value.supported
+
+
 def test_matmul_a100_fp16_hierarchy_roofline():
     op = get_operator("matmul")()
     hw = get_hardware("a100")()

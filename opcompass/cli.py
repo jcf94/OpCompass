@@ -176,7 +176,11 @@ def info_cmd(operator_name: str):
 @click.option("--hardware", "-H", required=True, help="Hardware target (e.g. a100)")
 @click.option("--dtype", "-d", default="fp16", help="Data type (default: fp16)")
 @click.option("--mode", "-m", default="hierarchy_roofline", help="Analysis mode: hierarchy_roofline, pipeline, solar")
-@click.option("--format", "-f", "fmt", default="table", help="Output format: table, json, csv")
+@click.option(
+    "--format", "-f", "fmt",
+    type=click.Choice(["table", "json", "csv"], case_sensitive=False),
+    default="table", show_default=True,
+)
 @click.option("--async-copy/--no-async-copy", default=True, help="Enable/disable async copy (pipeline mode)")
 @click.option("--sparsity/--no-sparsity", default=False, help="Enable/disable 2:4 sparsity (pipeline mode)")
 @click.option("--block-m", type=int, default=None, help="Override pipeline tile Block M")
@@ -273,7 +277,11 @@ def analyze_cmd(
 @click.option("--hardware", "-H", required=True, help="Hardware target(s), comma-separated (e.g. a100,h100)")
 @click.option("--dtype", "-d", default="fp16", help="Data type")
 @click.option("--mode", "-m", default="hierarchy_roofline", help="Analysis mode: hierarchy_roofline, pipeline, solar")
-@click.option("--format", "-f", "fmt", default="table", help="Output format: table, json, csv")
+@click.option(
+    "--format", "-f", "fmt",
+    type=click.Choice(["table", "json", "csv"], case_sensitive=False),
+    default="table", show_default=True,
+)
 @click.option("--async-copy/--no-async-copy", default=True, help="Enable/disable async copy (pipeline mode)")
 @click.option("--sparsity/--no-sparsity", default=False, help="Enable/disable 2:4 sparsity (pipeline mode)")
 @click.option("--block-m", type=int, default=None, help="Override pipeline tile Block M")

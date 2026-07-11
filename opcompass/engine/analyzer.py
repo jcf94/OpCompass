@@ -49,6 +49,15 @@ class Analyzer:
         # therefore only receive concrete, canonical, positive dimensions.
         dims = operator.validate_dimensions(dims)
 
+        if hardware.get_peak_flops(dtype) <= 0:
+            from opcompass.models import DataType, UnsupportedDataTypeError
+            supported = [
+                candidate
+                for candidate in DataType
+                if hardware.get_peak_flops(candidate) > 0
+            ]
+            raise UnsupportedDataTypeError(hardware.name, dtype, supported)
+
         # ── Solar mode: use SOLAR pytorch graph pipeline ──────────────
         if mode == AnalysisMode.SOLAR:
             if operator.mode_capabilities()["solar"] == "unsupported":

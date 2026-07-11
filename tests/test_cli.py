@@ -145,3 +145,30 @@ def test_cli_trace_is_opt_in_and_bounded():
     assert '"sub_ops"' not in compact.output
     assert traced.exit_code == 0
     assert traced.output.count('"pipeline_stage"') == 2
+
+
+def test_cli_rejects_unknown_output_format():
+    result = CliRunner().invoke(
+        main,
+        [
+            "analyze", "--hardware", "a100", "--format", "yaml",
+            "matmul", "--M", "128", "--N", "128", "--K", "128",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "Invalid value for '--format'" in result.output
+
+
+def test_cli_reports_unsupported_dtype_without_non_finite_output():
+    result = CliRunner().invoke(
+        main,
+        [
+            "analyze", "--hardware", "a100", "--dtype", "fp8",
+            "matmul", "--M", "128", "--N", "128", "--K", "128",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "does not support dtype 'fp8'" in result.output
+    assert "inf" not in result.output.lower()

@@ -30,7 +30,7 @@ from opcompass.registry import (
 from opcompass.models import (
     AnalysisMode, BackendUnavailableError, DataType, InfeasibleCandidateError,
     NonFiniteResultError, OperatorValidationError, PipelineConfig,
-    UnsupportedAnalysisError,
+    UnsupportedAnalysisError, UnsupportedDataTypeError,
 )
 from opcompass.engine.analyzer import Analyzer
 from opcompass.engine.result import _result_to_dict
@@ -401,6 +401,14 @@ def api_analyze(body: AnalyzeRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=422, detail={
             "code": exc.code,
             "message": exc.message,
+        })
+    except UnsupportedDataTypeError as exc:
+        raise HTTPException(status_code=422, detail={
+            "code": exc.code,
+            "hardware": exc.hardware,
+            "dtype": exc.dtype.value,
+            "supported_dtypes": [item.value for item in exc.supported],
+            "message": str(exc),
         })
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

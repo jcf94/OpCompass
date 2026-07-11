@@ -179,6 +179,22 @@ class InfeasibleCandidateError(ValueError):
         super().__init__(message)
 
 
+class UnsupportedDataTypeError(ValueError):
+    """Raised when a hardware target has no throughput model for a dtype."""
+
+    code = "unsupported_dtype"
+
+    def __init__(self, hardware: str, dtype: DataType, supported: list[DataType]):
+        self.hardware = hardware
+        self.dtype = dtype
+        self.supported = supported
+        values = ", ".join(item.value for item in supported)
+        super().__init__(
+            f"Hardware '{hardware}' does not support dtype '{dtype.value}'. "
+            f"Supported dtypes: {values}"
+        )
+
+
 @dataclass
 class MemoryTier:
     """A single level in the memory hierarchy."""
