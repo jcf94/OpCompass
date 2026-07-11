@@ -155,6 +155,30 @@ class NonFiniteResultError(RuntimeError):
         super().__init__(f"Analysis produced a non-finite numeric field: {field_path}")
 
 
+class BackendUnavailableError(RuntimeError):
+    """Raised when an explicitly requested optional backend cannot run."""
+
+    code = "optional_backend_unavailable"
+
+    def __init__(self, backend: str, missing_dependencies: list[str]):
+        self.backend = backend
+        self.missing_dependencies = missing_dependencies
+        super().__init__(
+            f"{backend} requires additional dependencies: "
+            f"{', '.join(missing_dependencies)}"
+        )
+
+
+class InfeasibleCandidateError(ValueError):
+    """Raised when no requested pipeline candidate satisfies constraints."""
+
+    code = "infeasible_pipeline_candidate"
+
+    def __init__(self, message: str):
+        self.message = message
+        super().__init__(message)
+
+
 @dataclass
 class MemoryTier:
     """A single level in the memory hierarchy."""

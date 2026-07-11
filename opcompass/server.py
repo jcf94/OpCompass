@@ -28,8 +28,9 @@ from opcompass.registry import (
     get_operator,
 )
 from opcompass.models import (
-    AnalysisMode, DataType, OperatorValidationError, PipelineConfig,
-    NonFiniteResultError, UnsupportedAnalysisError,
+    AnalysisMode, BackendUnavailableError, DataType, InfeasibleCandidateError,
+    NonFiniteResultError, OperatorValidationError, PipelineConfig,
+    UnsupportedAnalysisError,
 )
 from opcompass.engine.analyzer import Analyzer
 from opcompass.engine.result import _result_to_dict
@@ -388,6 +389,18 @@ def api_analyze(body: AnalyzeRequest) -> Dict[str, Any]:
             "code": exc.code,
             "field": exc.field_path,
             "message": str(exc),
+        })
+    except BackendUnavailableError as exc:
+        raise HTTPException(status_code=503, detail={
+            "code": exc.code,
+            "backend": exc.backend,
+            "missing_dependencies": exc.missing_dependencies,
+            "message": str(exc),
+        })
+    except InfeasibleCandidateError as exc:
+        raise HTTPException(status_code=422, detail={
+            "code": exc.code,
+            "message": exc.message,
         })
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

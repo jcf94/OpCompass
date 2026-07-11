@@ -51,6 +51,13 @@ class Analyzer:
 
         # ── Solar mode: use SOLAR pytorch graph pipeline ──────────────
         if mode == AnalysisMode.SOLAR:
+            if operator.mode_capabilities()["solar"] == "unsupported":
+                from opcompass.models import UnsupportedAnalysisError
+                raise UnsupportedAnalysisError(
+                    operator.name,
+                    AnalysisMode.SOLAR,
+                    f"Operator '{operator.name}' has no SOLAR model.",
+                )
             return self._finalize_result(
                 self._analyze_solar(operator, hardware, dtype, dims), hardware
             )

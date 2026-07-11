@@ -4,7 +4,10 @@ from __future__ import annotations
 import math
 from dataclasses import replace
 
-from opcompass.models import DataType, PipelineConfig, PipelineKernelCandidate, SubOp, TilingInfo
+from opcompass.models import (
+    DataType, InfeasibleCandidateError, PipelineConfig,
+    PipelineKernelCandidate, SubOp, TilingInfo,
+)
 from opcompass.operators.base import Operator
 
 
@@ -189,11 +192,13 @@ def get_inputs():
             return feasible
 
         if self._has_forced_pipeline_shape(pipeline_config) and rejected:
-            raise ValueError(rejected[0].rejection_reason)
+            raise InfeasibleCandidateError(rejected[0].rejection_reason)
         if rejected:
             reasons = "; ".join(c.rejection_reason for c in rejected[:3])
-            raise ValueError(f"No feasible pipeline candidates for {hardware.name}: {reasons}")
-        raise ValueError(f"No pipeline candidates for {hardware.name}")
+            raise InfeasibleCandidateError(
+                f"No feasible pipeline candidates for {hardware.name}: {reasons}"
+            )
+        raise InfeasibleCandidateError(f"No pipeline candidates for {hardware.name}")
 
     def get_rejected_pipeline_candidates(self, hardware, dtype=None, pipeline_config=None, **dims):
         """Return rejected candidates with reasons for diagnostics."""

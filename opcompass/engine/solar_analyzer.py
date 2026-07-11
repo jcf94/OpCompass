@@ -56,12 +56,8 @@ def _check_solar_dependencies():
         missing.append("torchview")
 
     if missing:
-        raise ImportError(
-            f"Solar analysis mode requires additional dependencies: {', '.join(missing)}. "
-            f"Install them with:\n"
-            f"  pip install {' '.join(missing)}\n"
-            f"Or follow SOLAR's install guide: 3rdparty/SOLAR/install.sh"
-        )
+        from opcompass.models import BackendUnavailableError
+        raise BackendUnavailableError("solar", missing)
 
 
 # ---------------------------------------------------------------------------

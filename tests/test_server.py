@@ -86,6 +86,60 @@ def test_analyze_api_strict_mode_returns_stable_unsupported_error():
     assert exc_info.value.detail["requested_mode"] == "pipeline"
 
 
+def test_analyze_api_rejects_unsupported_solar_operator_before_backend():
+    with pytest.raises(HTTPException) as exc_info:
+        api_analyze({
+            "operator": "reduction",
+            "hardware": "a100",
+            "mode": "solar",
+            "dims": {"N": 4096, "D": 256},
+        })
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail["code"] == "unsupported_analysis_mode"
+    assert exc_info.value.detail["requested_mode"] == "solar"
+
+
+def test_analyze_api_returns_stable_optional_backend_error(monkeypatch):
+    from opcompass.models import BackendUnavailableError
+    import opcompass.engine.solar_analyzer as solar_analyzer
+
+    def unavailable():
+        raise BackendUnavailableError("solar", ["torchview"])
+
+    monkeypatch.setattr(solar_analyzer, "_check_solar_dependencies", unavailable)
+    with pytest.raises(HTTPException) as exc_info:
+        api_analyze({
+            "operator": "matmul",
+            "hardware": "a100",
+            "mode": "solar",
+            "dims": {"M": 128, "N": 128, "K": 128},
+        })
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == {
+        "code": "optional_backend_unavailable",
+        "backend": "solar",
+        "missing_dependencies": ["torchview"],
+        "message": "solar requires additional dependencies: torchview",
+    }
+
+
+def test_analyze_api_returns_stable_infeasible_candidate_error():
+    with pytest.raises(HTTPException) as exc_info:
+        api_analyze({
+            "operator": "matmul",
+            "hardware": "a100",
+            "mode": "pipeline",
+            "dims": {"M": 128, "N": 128, "K": 128},
+            "pipeline_config": {"block_m": 63, "block_n": 64, "block_k": 16},
+        })
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail["code"] == "infeasible_pipeline_candidate"
+    assert "multiple of 16" in exc_info.value.detail["message"]
+
+
 def test_analyze_api_pipeline_trace_is_opt_in_and_bounded():
     body = {
         "operator": "matmul",
