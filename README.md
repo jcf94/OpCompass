@@ -202,6 +202,20 @@ Run tests:
 pytest
 ```
 
+The default collection is limited to first-party tests under `tests/`; vendored
+`3rdparty/SOLAR` tests are not included in the OpCompass pass count. Run the
+optional SOLAR integration subset separately when its dependencies are installed:
+
+```bash
+pytest -m solar
+```
+
+Run the fast first-party suite without optional SOLAR integration tests with:
+
+```bash
+pytest -m "not solar"
+```
+
 Run focused pipeline tests:
 
 ```bash

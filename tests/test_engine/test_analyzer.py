@@ -229,6 +229,7 @@ def test_solar_mode_requires_solar_model_source():
 
 
 @pytest.mark.skipif(not _has_solar_deps(), reason="torch/torchview/pyyaml not installed")
+@pytest.mark.solar
 def test_matmul_solar_a100_end_to_end():
     """Full end-to-end solar analysis of matmul on A100.
 
@@ -262,6 +263,7 @@ def test_matmul_solar_a100_end_to_end():
 
 
 @pytest.mark.skipif(not _has_solar_deps(), reason="torch/torchview/pyyaml not installed")
+@pytest.mark.solar
 @pytest.mark.parametrize("hardware_name,dtype", _solar_matmul_comparison_cases())
 def test_matmul_hierarchy_roofline_matches_solar_across_hardware_and_dtypes(hardware_name, dtype):
     """Matmul should produce nearly identical roofline results in hierarchy and SOLAR modes."""
@@ -291,6 +293,7 @@ def test_matmul_hierarchy_roofline_matches_solar_across_hardware_and_dtypes(hard
 
 
 @pytest.mark.skipif(not _has_solar_deps(), reason="torch/torchview/pyyaml not installed")
+@pytest.mark.solar
 def test_matmul_solar_h100_end_to_end():
     """Full end-to-end solar analysis of matmul on H100."""
     from opcompass.models import DataType, AnalysisMode
@@ -310,6 +313,7 @@ def test_matmul_solar_h100_end_to_end():
 
 
 @pytest.mark.skipif(not _has_solar_deps(), reason="torch/torchview/pyyaml not installed")
+@pytest.mark.solar
 def test_matmul_solar_cli_integration():
     """Verify the CLI and result formatting work for solar mode."""
     from opcompass.models import DataType, AnalysisMode
