@@ -255,7 +255,7 @@ def analyze_cmd(
             op_inst, hw_inst, resolved_dtype, mode=resolved_mode,
             pipeline_config=pipeline_config, strict=strict, **dims
         )
-    except ValueError as e:
+    except (ValueError, RuntimeError) as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
 
@@ -353,7 +353,7 @@ def sweep_cmd(
                     op_inst, hw_inst, resolved_dtype, mode=resolved_mode,
                     pipeline_config=pipeline_config, strict=strict, **fixed_dims
                 )
-            except ValueError as e:
+            except (ValueError, RuntimeError) as e:
                 click.echo(f"Error: {e}", err=True)
                 sys.exit(1)
             click.echo(format_result(
@@ -381,7 +381,7 @@ def sweep_cmd(
                     op_inst, hw_inst, resolved_dtype, mode=resolved_mode,
                     pipeline_config=pipeline_config, strict=strict, **all_dims
                 )
-            except ValueError as e:
+            except (ValueError, RuntimeError) as e:
                 click.echo(f"Error: {e}", err=True)
                 sys.exit(1)
             results.append(result)

@@ -11,9 +11,13 @@ Start with::
 import os
 from typing import Any, Dict, List
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import ValidationError
+
+from opcompass.api_models import AnalyzeRequest, AnalyzeResponse
 
 from opcompass.registry import (
     discover_hardware,
@@ -23,17 +27,32 @@ from opcompass.registry import (
 )
 from opcompass.models import (
     AnalysisMode, DataType, OperatorValidationError, PipelineConfig,
-    UnsupportedAnalysisError,
+    NonFiniteResultError, UnsupportedAnalysisError,
 )
 from opcompass.engine.analyzer import Analyzer
 from opcompass.engine.result import _result_to_dict
-from opcompass.engine.result import MAX_TRACE_SUB_OPS
 
 app = FastAPI(
     title="OpCompass API",
     description="SOL theoretical peak performance estimator for GPU operators",
     version="0.1.0",
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def api_request_validation_error(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """Return a stable code around FastAPI/Pydantic validation details."""
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": {
+                "code": "invalid_api_request",
+                "issues": exc.errors(),
+            }
+        },
+    )
 
 # ---------------------------------------------------------------------------
 # API Endpoints
@@ -289,8 +308,8 @@ def api_tile_constraints(operator: str, hardware: str, dtype: str = "fp16") -> D
     return op_cls().get_tile_constraints(hw_cls(), resolved_dtype)
 
 
-@app.post("/api/analyze")
-def api_analyze(body: Dict[str, Any]) -> Dict[str, Any]:
+@app.post("/api/analyze", response_model=AnalyzeResponse)
+def api_analyze(body: AnalyzeRequest) -> Dict[str, Any]:
     """Run a SOL analysis.
 
     Expected body::
@@ -303,31 +322,19 @@ def api_analyze(body: Dict[str, Any]) -> Dict[str, Any]:
             "dims": {"M": 4096, "N": 4096, "K": 4096}
         }
     """
-    operator_name = body.get("operator")
-    hardware_name = body.get("hardware")
-    dtype_str = body.get("dtype", "fp16")
-    mode_str = body.get("mode", "hierarchy_roofline")
-    dims = body.get("dims", {})
-    pipeline_config_dict = body.get("pipeline_config", None)
-    strict = body.get("strict", False)
-    include_trace = body.get("include_trace", False)
-    trace_limit = body.get("trace_limit", 1000)
+    # Keep direct Python callers useful while FastAPI itself supplies a model.
+    if isinstance(body, dict):
+        try:
+            body = AnalyzeRequest.model_validate(body)
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail={
+                "code": "invalid_api_request",
+                "issues": exc.errors(include_url=False),
+            })
 
-    if not isinstance(include_trace, bool):
-        raise HTTPException(status_code=400, detail="'include_trace' must be a boolean")
-    if (
-        not isinstance(trace_limit, int) or isinstance(trace_limit, bool)
-        or not 1 <= trace_limit <= MAX_TRACE_SUB_OPS
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail=f"'trace_limit' must be an integer between 1 and {MAX_TRACE_SUB_OPS}",
-        )
-
-    if not operator_name:
-        raise HTTPException(status_code=400, detail="Missing 'operator'")
-    if not hardware_name:
-        raise HTTPException(status_code=400, detail="Missing 'hardware'")
+    operator_name = body.operator
+    hardware_name = body.hardware
+    dims = body.dims
 
     try:
         op_cls = get_operator(operator_name)
@@ -339,27 +346,15 @@ def api_analyze(body: Dict[str, Any]) -> Dict[str, Any]:
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Hardware '{hardware_name}' not found")
 
-    try:
-        dtype = DataType(dtype_str.lower())
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"Unknown dtype '{dtype_str}'")
-
-    try:
-        mode = AnalysisMode(mode_str.lower())
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"Unknown mode '{mode_str}'")
+    dtype = body.dtype
+    mode = body.mode
 
     # Parse pipeline_config for pipeline mode
     pipeline_config = None
-    if pipeline_config_dict and mode == AnalysisMode.PIPELINE:
+    if body.pipeline_config and mode == AnalysisMode.PIPELINE:
+        pipeline_config_dict = body.pipeline_config
         pipeline_config = PipelineConfig(
-            async_copy_enabled=pipeline_config_dict.get("async_copy_enabled", True),
-            sparsity_2_4_enabled=pipeline_config_dict.get("sparsity_2_4_enabled", False),
-            block_m=pipeline_config_dict.get("block_m"),
-            block_n=pipeline_config_dict.get("block_n"),
-            block_k=pipeline_config_dict.get("block_k"),
-            stage_count=pipeline_config_dict.get("stage_count"),
-            warp_count=pipeline_config_dict.get("warp_count"),
+            **pipeline_config_dict.model_dump()
         )
 
     op = op_cls()
@@ -369,7 +364,7 @@ def api_analyze(body: Dict[str, Any]) -> Dict[str, Any]:
     try:
         result = analyzer.analyze(
             op, hw, dtype, mode=mode, pipeline_config=pipeline_config,
-            strict=strict, **dims
+            strict=body.strict, **dims
         )
     except OperatorValidationError as exc:
         raise HTTPException(status_code=422, detail={
@@ -384,11 +379,17 @@ def api_analyze(body: Dict[str, Any]) -> Dict[str, Any]:
             "requested_mode": exc.mode.value,
             "message": exc.message,
         })
+    except NonFiniteResultError as exc:
+        raise HTTPException(status_code=500, detail={
+            "code": exc.code,
+            "field": exc.field_path,
+            "message": str(exc),
+        })
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
     return _result_to_dict(
-        result, include_trace=include_trace, trace_limit=trace_limit
+        result, include_trace=body.include_trace, trace_limit=body.trace_limit
     )
 
 

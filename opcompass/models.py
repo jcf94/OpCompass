@@ -127,6 +127,16 @@ class UnsupportedAnalysisError(ValueError):
         super().__init__(message)
 
 
+class NonFiniteResultError(RuntimeError):
+    """Raised before a result containing NaN or infinity can succeed."""
+
+    code = "non_finite_analysis_result"
+
+    def __init__(self, field_path: str):
+        self.field_path = field_path
+        super().__init__(f"Analysis produced a non-finite numeric field: {field_path}")
+
+
 @dataclass
 class MemoryTier:
     """A single level in the memory hierarchy."""
@@ -351,6 +361,7 @@ class AnalysisResult:
     fallback: FallbackInfo | None = None
     schema_version: str = "0.2.0"
     model_id: str = "hierarchy_roofline_v1"
+    compute_unit_clock_hz: float = 0.0
     assumptions: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     missing_effects: list[str] = field(default_factory=list)

@@ -95,5 +95,44 @@ def test_analyze_api_rejects_unbounded_trace_limit():
             "dims": {"M": 256, "N": 256, "K": 256},
         })
 
-    assert exc_info.value.status_code == 400
-    assert "between 1 and 5000" in exc_info.value.detail
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail["code"] == "invalid_api_request"
+    assert exc_info.value.detail["issues"][0]["loc"] == ("trace_limit",)
+
+
+def test_openapi_exposes_typed_analyze_contract():
+    from opcompass.server import app
+
+    schema = app.openapi()
+    operation = schema["paths"]["/api/analyze"]["post"]
+
+    assert operation["requestBody"]["content"]["application/json"]["schema"]["$ref"].endswith("AnalyzeRequest")
+    assert operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith("AnalyzeResponse")
+
+
+def test_http_api_wraps_pydantic_errors_with_stable_code():
+    import asyncio
+    import json
+
+    from fastapi.exceptions import RequestValidationError
+    from pydantic import ValidationError
+
+    from opcompass.api_models import AnalyzeRequest
+    from opcompass.server import api_request_validation_error
+
+    with pytest.raises(ValidationError) as model_error:
+        AnalyzeRequest.model_validate({
+            "operator": "matmul",
+            "hardware": "a100",
+            "dims": {"M": "128", "N": 128, "K": 128},
+            "unexpected": True,
+        })
+
+    exc = RequestValidationError(model_error.value.errors(include_url=False))
+    response = asyncio.run(api_request_validation_error(None, exc))
+    payload = json.loads(response.body)
+    assert response.status_code == 422
+    assert payload["detail"]["code"] == "invalid_api_request"
+    locations = {tuple(issue["loc"]) for issue in payload["detail"]["issues"]}
+    assert ("dims", "M") in locations
+    assert ("unexpected",) in locations

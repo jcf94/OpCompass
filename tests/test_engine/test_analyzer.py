@@ -54,6 +54,20 @@ def test_reduction_requires_exact_rows():
         Analyzer().analyze(op, get_hardware("a100")(), DataType.FP16, N=100, D=32)
 
 
+def test_analyzer_rejects_non_finite_success_result():
+    from opcompass.models import AnalysisResult, NonFiniteResultError
+
+    result = AnalysisResult(
+        operator="test", hardware="test", sol_time_s=float("inf")
+    )
+
+    with pytest.raises(NonFiniteResultError) as exc_info:
+        Analyzer._ensure_finite_result(result)
+
+    assert exc_info.value.code == "non_finite_analysis_result"
+    assert exc_info.value.field_path == "result.sol_time_s"
+
+
 def test_matmul_a100_fp16_hierarchy_roofline():
     op = get_operator("matmul")()
     hw = get_hardware("a100")()

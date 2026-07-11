@@ -226,6 +226,7 @@ class SolarAnalyzer:
             estimate_kind=EstimateKind.ANALYTICAL_MODEL,
             support_level=SupportLevel.FORMULA,
             model_id="solar_v1",
+            compute_unit_clock_hz=freq_hz,
             assumptions=["SOLAR fused-prefetched execution is used as the point estimate."],
             missing_effects=["Measured kernel calibration"],
             total_flops=total_flops,

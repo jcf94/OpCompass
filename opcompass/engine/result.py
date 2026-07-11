@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import csv
+import io
+import json
+
 if TYPE_CHECKING:
     from opcompass.models import AnalysisResult
 
@@ -27,11 +31,11 @@ def format_result(
         Formatted string.
     """
     if fmt == "json":
-        import json
         return json.dumps(
             _result_to_dict(result, include_trace=include_trace, trace_limit=trace_limit),
             indent=2,
             ensure_ascii=False,
+            allow_nan=False,
         )
 
     if fmt == "csv":
@@ -269,9 +273,9 @@ def _format_table(result: AnalysisResult) -> str:
             "─" * 65,
             f"  {'Phase':<20} {'Cycles':>10}  {'Time':>10}",
             f"  {'─'*20} {'─'*10}  {'─'*10}",
-            f"  {'Prologue':<20} {ps.prologue_cycles:>10,}  {ps.prologue_cycles * 1e3 / result.compute_unit_clock_hz if hasattr(result, 'compute_unit_clock_hz') else 0:>9.1f} µs",
-            f"  {'Steady state ×' + str(ps.num_k_iterations - 1) if ps.num_k_iterations > 1 else 'Steady state':<20} {ps.per_iteration_cycles * max(0, ps.num_k_iterations - 1):>10,}",
-            f"  {'Epilogue':<20} {ps.epilogue_cycles:>10,}",
+            f"  {'Prologue':<20} {ps.prologue_cycles:>10,}  {ps.prologue_cycles / result.compute_unit_clock_hz * 1e6:>9.3f} µs",
+            f"  {'Steady state ×' + str(ps.num_k_iterations - 1) if ps.num_k_iterations > 1 else 'Steady state':<20} {ps.per_iteration_cycles * max(0, ps.num_k_iterations - 1):>10,}  {ps.per_iteration_cycles * max(0, ps.num_k_iterations - 1) / result.compute_unit_clock_hz * 1e6:>9.3f} µs",
+            f"  {'Epilogue':<20} {ps.epilogue_cycles:>10,}  {ps.epilogue_cycles / result.compute_unit_clock_hz * 1e6:>9.3f} µs",
             "─" * 65,
             f"  Total cycles/block : {ps.total_cycles_per_block:,}",
             f"  Grid size          : {ps.grid_size} blocks",
@@ -352,6 +356,27 @@ def _format_table(result: AnalysisResult) -> str:
 
 def _format_csv(result: AnalysisResult) -> str:
     d = _result_to_dict(result)
-    header = ",".join(d.keys())
-    values = ",".join(str(v) for v in d.values())
-    return f"{header}\n{values}"
+    row = {
+        "schema_version": d["schema_version"],
+        "operator": d["operator"],
+        "hardware": d["hardware"],
+        "shapes_json": json.dumps(d["shapes"], separators=(",", ":")),
+        "dtype": d["dtype"],
+        "requested_mode": d["requested_mode"],
+        "executed_mode": d["executed_mode"],
+        "estimate_kind": d["estimate_kind"],
+        "support_level": d["support_level"],
+        "model_id": d["model_id"],
+        "fallback_reason_code": d["fallback"]["reason_code"] if d["fallback"] else "",
+        "total_flops": d["total_flops"],
+        "total_read_bytes": d["total_read_bytes"],
+        "total_write_bytes": d["total_write_bytes"],
+        "sol_time_us": d["sol_time_us"],
+        "sol_tflops": d["sol_tflops"],
+        "bottleneck": d["bottleneck"],
+    }
+    stream = io.StringIO(newline="")
+    writer = csv.DictWriter(stream, fieldnames=list(row), lineterminator="\n")
+    writer.writeheader()
+    writer.writerow(row)
+    return stream.getvalue().rstrip("\n")
