@@ -7,6 +7,48 @@ from enum import Enum
 from typing import Any
 
 
+class ParameterKind(str, Enum):
+    """How an operator parameter affects an analysis request."""
+
+    SHAPE = "shape"
+    IMPLEMENTATION = "implementation"
+
+
+@dataclass(frozen=True)
+class OperatorParameterSpec:
+    """Typed contract for one concrete operator parameter."""
+
+    name: str
+    description: str
+    aliases: tuple[str, ...] = ()
+    value_type: type = int
+    required: bool = True
+    default: Any = None
+    minimum: int | float | None = 1
+    multiple_of: int | None = None
+    kind: ParameterKind = ParameterKind.SHAPE
+
+
+@dataclass(frozen=True)
+class OperatorSpec:
+    """Stable, machine-readable parameter contract for an operator."""
+
+    name: str
+    parameters: tuple[OperatorParameterSpec, ...]
+
+
+class OperatorValidationError(ValueError):
+    """Typed invalid-workload error shared by API, CLI, and engine users."""
+
+    code = "invalid_operator_parameters"
+
+    def __init__(self, operator: str, issues: list[dict[str, str]]):
+        self.operator = operator
+        self.issues = issues
+        message = "; ".join(issue["message"] for issue in issues)
+        super().__init__(f"Invalid parameters for {operator}: {message}")
+
+
 class DataType(str, Enum):
     """Supported numerical data types."""
 

@@ -8,7 +8,7 @@ Output: (N, C_out, H_out, W_out)
 FLOPs (per convention) = 2 * N * C_out * H_out * W_out * C_in * K_h * K_w
 """
 
-from opcompass.models import DataType
+from opcompass.models import DataType, OperatorParameterSpec, OperatorSpec
 from opcompass.operators.base import Operator
 
 
@@ -40,6 +40,16 @@ class Convolution(Operator):
             "H_out": "Output height (default = H)",
             "W_out": "Output width (default = W)",
         }
+
+    @property
+    def spec(self) -> OperatorSpec:
+        descriptions = self.param_dims
+        return OperatorSpec(self.name, tuple(
+            OperatorParameterSpec(
+                name, description, required=name not in {"H_out", "W_out"}
+            )
+            for name, description in descriptions.items()
+        ))
 
     def compute_flops(
         self,

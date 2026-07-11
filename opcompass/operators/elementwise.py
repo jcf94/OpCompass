@@ -8,7 +8,7 @@ FLOPs = 1 * N  (one operation per element: multiply, add, exp, tanh, etc.)
 Some element-wise ops like gelu/swish count as a few ops per element.
 """
 
-from opcompass.models import DataType
+from opcompass.models import DataType, OperatorParameterSpec, OperatorSpec, ParameterKind
 from opcompass.operators.base import Operator
 
 
@@ -31,6 +31,16 @@ class Elementwise(Operator):
             "N": "Total number of elements",
             "ops_per_element": "FLOPs per element (default 1 for simple ops, ~6 for gelu)",
         }
+
+    @property
+    def spec(self) -> OperatorSpec:
+        return OperatorSpec(self.name, (
+            OperatorParameterSpec("N", "Total number of elements"),
+            OperatorParameterSpec(
+                "ops_per_element", "FLOPs per element", required=False, default=1,
+                kind=ParameterKind.IMPLEMENTATION,
+            ),
+        ))
 
     def compute_flops(
         self, N: int = 0, ops_per_element: int = 1, **kwargs

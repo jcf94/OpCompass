@@ -43,6 +43,10 @@ class Analyzer:
         if mode is None:
             mode = AnalysisMode.HIERARCHY_ROOFLINE
 
+        # All entry points share this validation boundary. Downstream formulas
+        # therefore only receive concrete, canonical, positive dimensions.
+        dims = operator.validate_dimensions(dims)
+
         # ── Solar mode: use SOLAR pytorch graph pipeline ──────────────
         if mode == AnalysisMode.SOLAR:
             return self._analyze_solar(operator, hardware, dtype, dims)

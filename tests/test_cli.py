@@ -80,3 +80,26 @@ def test_cli_analyze_accepts_pipeline_stage_and_warp_overrides():
     assert '"stage_count": 3' in result.output
     assert '"warp_count": 8' in result.output
     assert '"pipeline_candidates"' in result.output
+
+
+def test_cli_analyze_rejects_missing_required_dimension():
+    result = CliRunner().invoke(
+        main,
+        ["analyze", "--hardware", "a100", "matmul", "--M", "128", "--N", "128"],
+    )
+
+    assert result.exit_code == 1
+    assert "missing required parameter 'K'" in result.output
+
+
+def test_cli_analyze_rejects_unknown_dimension():
+    result = CliRunner().invoke(
+        main,
+        [
+            "analyze", "--hardware", "a100", "matmul",
+            "--M", "128", "--N", "128", "--K", "128", "--batch", "2",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "unknown parameter 'batch'" in result.output

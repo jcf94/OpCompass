@@ -1,8 +1,57 @@
 """Test the SOL analyzer end-to-end."""
 
+import pytest
+
 from opcompass.registry import get_operator, get_hardware
 from opcompass.models import DataType, AnalysisMode
+from opcompass.models import OperatorValidationError
 from opcompass.engine.analyzer import Analyzer
+
+
+@pytest.mark.parametrize(
+    "dims,reason,parameter",
+    [
+        ({"M": 128, "N": 128}, "missing", "K"),
+        ({"M": 0, "N": 128, "K": 128}, "minimum", "M"),
+        ({"M": -1, "N": 128, "K": 128}, "minimum", "M"),
+        ({"M": 128, "N": 128, "K": 128, "typo": 1}, "unknown", "typo"),
+        ({"M": "128", "N": 128, "K": 128}, "type", "M"),
+    ],
+)
+def test_analyzer_rejects_invalid_matmul_dimensions(dims, reason, parameter):
+    op = get_operator("matmul")()
+    hw = get_hardware("a100")()
+
+    with pytest.raises(OperatorValidationError) as exc_info:
+        Analyzer().analyze(op, hw, DataType.FP16, **dims)
+
+    assert exc_info.value.code == "invalid_operator_parameters"
+    assert {issue["reason"] for issue in exc_info.value.issues} == {reason}
+    assert exc_info.value.issues[0]["parameter"] == parameter
+
+
+def test_elementwise_dimension_default_is_canonicalized():
+    op = get_operator("elementwise")()
+    result = Analyzer().analyze(op, get_hardware("a100")(), DataType.FP16, N=1024)
+
+    assert result.shapes == {"N": 1024, "ops_per_element": 1}
+    assert result.total_flops == 1024
+
+
+def test_matmul_dimensions_use_canonical_spec_order():
+    result = Analyzer().analyze(
+        get_operator("matmul")(), get_hardware("a100")(), DataType.FP16,
+        K=32, M=128, N=64,
+    )
+
+    assert list(result.shapes) == ["M", "N", "K"]
+
+
+def test_reduction_requires_exact_rows():
+    op = get_operator("reduction")()
+
+    with pytest.raises(OperatorValidationError, match="must divide"):
+        Analyzer().analyze(op, get_hardware("a100")(), DataType.FP16, N=100, D=32)
 
 
 def test_matmul_a100_fp16_hierarchy_roofline():
@@ -77,9 +126,6 @@ def test_matmul_fp32_memory_bound():
 # ---------------------------------------------------------------------------
 # Solar mode tests
 # ---------------------------------------------------------------------------
-
-import pytest
-
 
 def _has_solar_deps():
     """Return True if torch, torchview, and pyyaml are available."""

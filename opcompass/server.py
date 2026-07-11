@@ -21,7 +21,7 @@ from opcompass.registry import (
     get_hardware,
     get_operator,
 )
-from opcompass.models import AnalysisMode, DataType, PipelineConfig
+from opcompass.models import AnalysisMode, DataType, PipelineConfig, OperatorValidationError
 from opcompass.engine.analyzer import Analyzer
 from opcompass.engine.result import _result_to_dict
 
@@ -43,10 +43,25 @@ def api_list_operators() -> List[Dict[str, Any]]:
     result: List[Dict[str, Any]] = []
     for name, cls in sorted(ops.items()):
         inst = cls()
+        spec = inst.spec
         result.append({
             "name": name,
             "description": inst.description,
             "param_dims": inst.param_dims,
+            "parameter_spec": [
+                {
+                    "name": parameter.name,
+                    "aliases": list(parameter.aliases),
+                    "type": parameter.value_type.__name__,
+                    "required": parameter.required,
+                    "default": parameter.default,
+                    "minimum": parameter.minimum,
+                    "multiple_of": parameter.multiple_of,
+                    "kind": parameter.kind.value,
+                    "description": parameter.description,
+                }
+                for parameter in spec.parameters
+            ],
         })
     return result
 
@@ -335,6 +350,12 @@ def api_analyze(body: Dict[str, Any]) -> Dict[str, Any]:
     analyzer = Analyzer()
     try:
         result = analyzer.analyze(op, hw, dtype, mode=mode, pipeline_config=pipeline_config, **dims)
+    except OperatorValidationError as exc:
+        raise HTTPException(status_code=422, detail={
+            "code": exc.code,
+            "operator": exc.operator,
+            "issues": exc.issues,
+        })
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
