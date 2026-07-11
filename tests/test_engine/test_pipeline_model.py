@@ -529,3 +529,34 @@ def test_pipeline_mode_fallback():
         M=4096, N=4096, K=4096,
     )
     assert result.sol_time_s > 0
+
+
+def test_non_pipeline_operator_reports_explicit_fallback():
+    from opcompass.models import EstimateKind, SupportLevel
+
+    result = Analyzer().analyze(
+        get_operator("reduction")(), get_hardware("a100")(), DataType.FP16,
+        mode=AnalysisMode.PIPELINE, N=4096, D=256,
+    )
+
+    assert result.requested_mode == AnalysisMode.PIPELINE
+    assert result.executed_mode == AnalysisMode.HIERARCHY_ROOFLINE
+    assert result.estimate_kind == EstimateKind.THEORETICAL_BOUND
+    assert result.support_level == SupportLevel.FORMULA
+    assert result.model_id == "hierarchy_roofline_v1"
+    assert result.fallback is not None
+    assert result.fallback.reason_code == "pipeline_model_unavailable"
+    assert result.warnings == [result.fallback.message]
+
+
+def test_strict_pipeline_mode_rejects_non_pipeline_operator():
+    from opcompass.models import UnsupportedAnalysisError
+
+    with pytest.raises(UnsupportedAnalysisError) as exc_info:
+        Analyzer().analyze(
+            get_operator("reduction")(), get_hardware("a100")(), DataType.FP16,
+            mode=AnalysisMode.PIPELINE, strict=True, N=4096, D=256,
+        )
+
+    assert exc_info.value.code == "unsupported_analysis_mode"
+    assert exc_info.value.mode == AnalysisMode.PIPELINE

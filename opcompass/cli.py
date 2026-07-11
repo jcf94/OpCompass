@@ -183,6 +183,7 @@ def info_cmd(operator_name: str):
 @click.option("--block-k", type=int, default=None, help="Override pipeline tile Block K")
 @click.option("--stage-count", type=int, default=None, help="Override pipeline stage count")
 @click.option("--warp-count", type=int, default=None, help="Override pipeline warps per block")
+@click.option("--strict/--allow-fallback", default=False, help="Reject unsupported requested modes instead of falling back")
 @click.argument("operator_name")
 @click.pass_context
 def analyze_cmd(
@@ -198,6 +199,7 @@ def analyze_cmd(
     block_k: int | None,
     stage_count: int | None,
     warp_count: int | None,
+    strict: bool,
     operator_name: str,
 ):
     """Analyze SOL performance for an operator.
@@ -247,7 +249,7 @@ def analyze_cmd(
     try:
         result = analyzer.analyze(
             op_inst, hw_inst, resolved_dtype, mode=resolved_mode,
-            pipeline_config=pipeline_config, **dims
+            pipeline_config=pipeline_config, strict=strict, **dims
         )
     except ValueError as e:
         click.echo(f"Error: {e}", err=True)
@@ -272,6 +274,7 @@ def analyze_cmd(
 @click.option("--block-k", type=int, default=None, help="Override pipeline tile Block K")
 @click.option("--stage-count", type=int, default=None, help="Override pipeline stage count")
 @click.option("--warp-count", type=int, default=None, help="Override pipeline warps per block")
+@click.option("--strict/--allow-fallback", default=False, help="Reject unsupported requested modes instead of falling back")
 @click.argument("operator_name")
 @click.pass_context
 def sweep_cmd(
@@ -287,6 +290,7 @@ def sweep_cmd(
     block_k: int | None,
     stage_count: int | None,
     warp_count: int | None,
+    strict: bool,
     operator_name: str,
 ):
     """Sweep over multiple dimensions / hardware targets.
@@ -337,7 +341,7 @@ def sweep_cmd(
             try:
                 result = analyzer.analyze(
                     op_inst, hw_inst, resolved_dtype, mode=resolved_mode,
-                    pipeline_config=pipeline_config, **fixed_dims
+                    pipeline_config=pipeline_config, strict=strict, **fixed_dims
                 )
             except ValueError as e:
                 click.echo(f"Error: {e}", err=True)
@@ -363,7 +367,7 @@ def sweep_cmd(
             try:
                 result = analyzer.analyze(
                     op_inst, hw_inst, resolved_dtype, mode=resolved_mode,
-                    pipeline_config=pipeline_config, **all_dims
+                    pipeline_config=pipeline_config, strict=strict, **all_dims
                 )
             except ValueError as e:
                 click.echo(f"Error: {e}", err=True)

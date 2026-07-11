@@ -39,6 +39,24 @@ def _result_to_dict(result: AnalysisResult) -> dict:
         "shapes": result.shapes,
         "dtype": result.dtype.value,
         "mode": result.mode.value,
+        "requested_mode": result.requested_mode.value,
+        "executed_mode": result.executed_mode.value,
+        "estimate_kind": result.estimate_kind.value,
+        "support_level": result.support_level.value,
+        "schema_version": result.schema_version,
+        "model_id": result.model_id,
+        "fallback": (
+            {
+                "from_mode": result.fallback.from_mode.value,
+                "to_mode": result.fallback.to_mode.value,
+                "reason_code": result.fallback.reason_code,
+                "message": result.fallback.message,
+            }
+            if result.fallback else None
+        ),
+        "assumptions": result.assumptions,
+        "warnings": result.warnings,
+        "missing_effects": result.missing_effects,
         "total_flops": result.total_flops,
         "total_read_bytes": result.total_read_bytes,
         "total_write_bytes": result.total_write_bytes,
@@ -188,7 +206,9 @@ def _format_table(result: AnalysisResult) -> str:
         f"  Hardware   : {result.hardware}",
         f"  Shapes     : {result.shapes}",
         f"  Dtype      : {result.dtype.value}",
-        f"  Mode       : {result.mode.value}",
+        f"  Mode       : {result.requested_mode.value} → {result.executed_mode.value}",
+        f"  Estimate   : {result.estimate_kind.value} ({result.support_level.value})",
+        f"  Model      : {result.model_id} / schema {result.schema_version}",
         "─" * 65,
         f"  Total FLOPs : {ops:>18s}",
         f"  Read bytes  : {read:>18s}",
@@ -201,6 +221,8 @@ def _format_table(result: AnalysisResult) -> str:
         f"  ★ SOL time   : {sol_us:8.1f} µs  ({result.sol_tflops:.1f} TFLOPS)",
         f"  ★ Bottleneck : {result.bottleneck}",
     ]
+    if result.fallback is not None:
+        lines.append(f"  ⚠ Fallback : {result.fallback.message}")
     if is_pipeline:
         lines.append("  Note: Read/Compute/Write above are non-additive because pipeline stages overlap")
     lines.append("═" * 65)

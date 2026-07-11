@@ -103,3 +103,31 @@ def test_cli_analyze_rejects_unknown_dimension():
 
     assert result.exit_code == 1
     assert "unknown parameter 'batch'" in result.output
+
+
+def test_cli_pipeline_fallback_is_explicit_in_json():
+    result = CliRunner().invoke(
+        main,
+        [
+            "analyze", "--hardware", "a100", "--mode", "pipeline",
+            "--format", "json", "reduction", "--N", "4096", "--D", "256",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert '"requested_mode": "pipeline"' in result.output
+    assert '"executed_mode": "hierarchy_roofline"' in result.output
+    assert '"reason_code": "pipeline_model_unavailable"' in result.output
+
+
+def test_cli_strict_pipeline_rejects_fallback():
+    result = CliRunner().invoke(
+        main,
+        [
+            "analyze", "--hardware", "a100", "--mode", "pipeline", "--strict",
+            "reduction", "--N", "4096", "--D", "256",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "has no pipeline model" in result.output

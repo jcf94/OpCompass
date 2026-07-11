@@ -127,7 +127,10 @@ class SolarAnalyzer:
         Returns:
             AnalysisResult with solar_data populated.
         """
-        from opcompass.models import AnalysisMode, AnalysisResult, SolarAnalysisData
+        from opcompass.models import (
+            AnalysisMode, AnalysisResult, EstimateKind, SolarAnalysisData,
+            SupportLevel,
+        )
 
         # Check dependencies before attempting SOLAR import
         _check_solar_dependencies()
@@ -218,6 +221,13 @@ class SolarAnalyzer:
             shapes=dims,
             dtype=dtype,
             mode=AnalysisMode.SOLAR,
+            requested_mode=AnalysisMode.SOLAR,
+            executed_mode=AnalysisMode.SOLAR,
+            estimate_kind=EstimateKind.ANALYTICAL_MODEL,
+            support_level=SupportLevel.FORMULA,
+            model_id="solar_v1",
+            assumptions=["SOLAR fused-prefetched execution is used as the point estimate."],
+            missing_effects=["Measured kernel calibration"],
             total_flops=total_flops,
             total_read_bytes=read_bytes,
             total_write_bytes=write_bytes,

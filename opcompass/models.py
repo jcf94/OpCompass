@@ -87,6 +87,46 @@ class AnalysisMode(str, Enum):
     SOLAR = "solar"                           # SOLAR torch graph analysis (via 3rdparty/SOLAR)
 
 
+class EstimateKind(str, Enum):
+    """Semantic meaning of the reported runtime."""
+
+    THEORETICAL_BOUND = "theoretical_bound"
+    ANALYTICAL_MODEL = "analytical_model"
+    CALIBRATED = "calibrated"
+    LEARNED = "learned"
+
+
+class SupportLevel(str, Enum):
+    """Highest evidence/model support available for this result."""
+
+    UNSUPPORTED = "unsupported"
+    FORMULA = "formula"
+    PIPELINE = "pipeline"
+    VALIDATED = "validated"
+
+
+@dataclass(frozen=True)
+class FallbackInfo:
+    """Records an explicit change from the requested analysis mode."""
+
+    from_mode: AnalysisMode
+    to_mode: AnalysisMode
+    reason_code: str
+    message: str
+
+
+class UnsupportedAnalysisError(ValueError):
+    """Raised when strict mode forbids an unsupported requested model."""
+
+    code = "unsupported_analysis_mode"
+
+    def __init__(self, operator: str, mode: AnalysisMode, message: str):
+        self.operator = operator
+        self.mode = mode
+        self.message = message
+        super().__init__(message)
+
+
 @dataclass
 class MemoryTier:
     """A single level in the memory hierarchy."""
@@ -303,6 +343,18 @@ class AnalysisResult:
     dtype: DataType = DataType.FP16
     mode: AnalysisMode = AnalysisMode.HIERARCHY_ROOFLINE
 
+    # ——— v0.2 result identity and semantics ———
+    requested_mode: AnalysisMode | None = None
+    executed_mode: AnalysisMode | None = None
+    estimate_kind: EstimateKind = EstimateKind.THEORETICAL_BOUND
+    support_level: SupportLevel = SupportLevel.FORMULA
+    fallback: FallbackInfo | None = None
+    schema_version: str = "0.2.0"
+    model_id: str = "hierarchy_roofline_v1"
+    assumptions: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    missing_effects: list[str] = field(default_factory=list)
+
     # ——— fundamental quantities ———
     total_flops: int = 0
     total_read_bytes: int = 0
@@ -331,6 +383,12 @@ class AnalysisResult:
 
     # ——— solar-specific results (None for non-solar modes) ———
     solar_data: SolarAnalysisData | None = None
+
+    def __post_init__(self) -> None:
+        if self.requested_mode is None:
+            self.requested_mode = self.mode
+        if self.executed_mode is None:
+            self.executed_mode = self.mode
 
     def summary(self) -> str:
         """Return a one-line summary string."""

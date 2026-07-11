@@ -21,7 +21,10 @@ from opcompass.registry import (
     get_hardware,
     get_operator,
 )
-from opcompass.models import AnalysisMode, DataType, PipelineConfig, OperatorValidationError
+from opcompass.models import (
+    AnalysisMode, DataType, OperatorValidationError, PipelineConfig,
+    UnsupportedAnalysisError,
+)
 from opcompass.engine.analyzer import Analyzer
 from opcompass.engine.result import _result_to_dict
 
@@ -305,6 +308,7 @@ def api_analyze(body: Dict[str, Any]) -> Dict[str, Any]:
     mode_str = body.get("mode", "hierarchy_roofline")
     dims = body.get("dims", {})
     pipeline_config_dict = body.get("pipeline_config", None)
+    strict = body.get("strict", False)
 
     if not operator_name:
         raise HTTPException(status_code=400, detail="Missing 'operator'")
@@ -349,12 +353,22 @@ def api_analyze(body: Dict[str, Any]) -> Dict[str, Any]:
 
     analyzer = Analyzer()
     try:
-        result = analyzer.analyze(op, hw, dtype, mode=mode, pipeline_config=pipeline_config, **dims)
+        result = analyzer.analyze(
+            op, hw, dtype, mode=mode, pipeline_config=pipeline_config,
+            strict=strict, **dims
+        )
     except OperatorValidationError as exc:
         raise HTTPException(status_code=422, detail={
             "code": exc.code,
             "operator": exc.operator,
             "issues": exc.issues,
+        })
+    except UnsupportedAnalysisError as exc:
+        raise HTTPException(status_code=422, detail={
+            "code": exc.code,
+            "operator": exc.operator,
+            "requested_mode": exc.mode.value,
+            "message": exc.message,
         })
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

@@ -32,3 +32,36 @@ def test_analyze_api_returns_stable_validation_error():
         "reason": "missing",
         "message": "missing required parameter 'K'",
     }]
+
+
+def test_analyze_api_serializes_explicit_fallback_contract():
+    result = api_analyze({
+        "operator": "reduction",
+        "hardware": "a100",
+        "dtype": "fp16",
+        "mode": "pipeline",
+        "dims": {"N": 4096, "D": 256},
+    })
+
+    assert result["requested_mode"] == "pipeline"
+    assert result["executed_mode"] == "hierarchy_roofline"
+    assert result["estimate_kind"] == "theoretical_bound"
+    assert result["support_level"] == "formula"
+    assert result["schema_version"] == "0.2.0"
+    assert result["fallback"]["reason_code"] == "pipeline_model_unavailable"
+
+
+def test_analyze_api_strict_mode_returns_stable_unsupported_error():
+    with pytest.raises(HTTPException) as exc_info:
+        api_analyze({
+            "operator": "reduction",
+            "hardware": "a100",
+            "dtype": "fp16",
+            "mode": "pipeline",
+            "strict": True,
+            "dims": {"N": 4096, "D": 256},
+        })
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail["code"] == "unsupported_analysis_mode"
+    assert exc_info.value.detail["requested_mode"] == "pipeline"
