@@ -83,6 +83,19 @@
                 </div>
             </div>
 
+            <section id="model-contract" class="model-contract" aria-live="polite">
+                <div class="model-route">
+                    <span class="contract-kicker">Execution route</span>
+                    <strong id="contract-route">—</strong>
+                    <span id="contract-status" class="contract-status">Awaiting analysis</span>
+                </div>
+                <div class="contract-field"><span>Estimate / support</span><strong id="contract-estimate">—</strong></div>
+                <div class="contract-field"><span>Model / build</span><strong id="contract-model">—</strong><small id="contract-build">—</small></div>
+                <div class="contract-field"><span>Evidence</span><strong id="contract-evidence">—</strong><small id="contract-evidence-sources">—</small></div>
+                <div class="contract-field"><span>Uncertainty</span><strong id="contract-uncertainty">—</strong><small id="contract-uncertainty-reason">—</small></div>
+                <p id="contract-message" class="contract-message">Run an analysis to inspect its model contract.</p>
+            </section>
+
             <div class="card-row">
                 <div class="card chart-container">
                     <h2>Time Breakdown</h2>
@@ -278,7 +291,7 @@
 </main>
 
 <footer>
-    OpCompass v0.1.0 — Theoretical upper-bound estimates
+    OpCompass v0.2 — Versioned analytical estimates
 </footer>
 
 <script src="/static/js/api.js?v=20260626-memory-capacity"></script>
@@ -286,6 +299,7 @@
 <script src="/static/js/pipeline.js?v=20260626-memory-capacity"></script>
 <script src="/static/js/hardware.js?v=20260626-memory-capacity"></script>
 <script src="/static/js/overview.js?v=20260626-memory-capacity"></script>
-<script src="/static/js/app.js?v=20260626-memory-capacity"></script>
+<script src="/static/js/result_contract.js?v=20260711-v02-contract"></script>
+<script src="/static/js/app.js?v=20260711-v02-contract"></script>
 </body>
 </html>

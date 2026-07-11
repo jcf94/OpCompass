@@ -19,5 +19,6 @@ def test_implementation_revision_can_be_injected(monkeypatch):
 
 def test_runtime_resource_paths_exist():
     assert (Path(WEB_DIR) / "index.html").is_file()
+    assert (Path(WEB_DIR) / "js" / "result_contract.js").is_file()
     assert HARDWARE_TO_SOLAR_ARCH
     assert all(Path(path).is_file() for path in HARDWARE_TO_SOLAR_ARCH.values())
