@@ -65,3 +65,35 @@ def test_analyze_api_strict_mode_returns_stable_unsupported_error():
     assert exc_info.value.status_code == 422
     assert exc_info.value.detail["code"] == "unsupported_analysis_mode"
     assert exc_info.value.detail["requested_mode"] == "pipeline"
+
+
+def test_analyze_api_pipeline_trace_is_opt_in_and_bounded():
+    body = {
+        "operator": "matmul",
+        "hardware": "a100",
+        "dtype": "fp16",
+        "mode": "pipeline",
+        "dims": {"M": 256, "N": 256, "K": 256},
+    }
+    compact = api_analyze(body)
+    traced = api_analyze({**body, "include_trace": True, "trace_limit": 2})
+
+    assert "sub_ops" not in compact["pipeline_schedule"]
+    assert compact["pipeline_schedule"]["trace"]["included"] is False
+    assert len(traced["pipeline_schedule"]["sub_ops"]) == 2
+    assert traced["pipeline_schedule"]["trace"]["returned_sub_ops"] == 2
+
+
+def test_analyze_api_rejects_unbounded_trace_limit():
+    with pytest.raises(HTTPException) as exc_info:
+        api_analyze({
+            "operator": "matmul",
+            "hardware": "a100",
+            "mode": "pipeline",
+            "include_trace": True,
+            "trace_limit": 5001,
+            "dims": {"M": 256, "N": 256, "K": 256},
+        })
+
+    assert exc_info.value.status_code == 400
+    assert "between 1 and 5000" in exc_info.value.detail

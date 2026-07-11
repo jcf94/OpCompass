@@ -40,7 +40,11 @@ const API = {
 
     /** Run a SOL analysis. */
     analyze(operator, hardware, dtype, mode, dims, pipelineConfig) {
-        const body = { operator, hardware, dtype, mode, dims };
+        const body = {
+            operator, hardware, dtype, mode, dims,
+            include_trace: mode === "pipeline",
+            trace_limit: 2000,
+        };
         if (pipelineConfig) body.pipeline_config = pipelineConfig;
         return this._post("/analyze", body);
     },

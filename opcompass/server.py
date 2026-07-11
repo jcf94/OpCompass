@@ -27,6 +27,7 @@ from opcompass.models import (
 )
 from opcompass.engine.analyzer import Analyzer
 from opcompass.engine.result import _result_to_dict
+from opcompass.engine.result import MAX_TRACE_SUB_OPS
 
 app = FastAPI(
     title="OpCompass API",
@@ -309,6 +310,19 @@ def api_analyze(body: Dict[str, Any]) -> Dict[str, Any]:
     dims = body.get("dims", {})
     pipeline_config_dict = body.get("pipeline_config", None)
     strict = body.get("strict", False)
+    include_trace = body.get("include_trace", False)
+    trace_limit = body.get("trace_limit", 1000)
+
+    if not isinstance(include_trace, bool):
+        raise HTTPException(status_code=400, detail="'include_trace' must be a boolean")
+    if (
+        not isinstance(trace_limit, int) or isinstance(trace_limit, bool)
+        or not 1 <= trace_limit <= MAX_TRACE_SUB_OPS
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=f"'trace_limit' must be an integer between 1 and {MAX_TRACE_SUB_OPS}",
+        )
 
     if not operator_name:
         raise HTTPException(status_code=400, detail="Missing 'operator'")
@@ -373,7 +387,9 @@ def api_analyze(body: Dict[str, Any]) -> Dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    return _result_to_dict(result)
+    return _result_to_dict(
+        result, include_trace=include_trace, trace_limit=trace_limit
+    )
 
 
 # ---------------------------------------------------------------------------

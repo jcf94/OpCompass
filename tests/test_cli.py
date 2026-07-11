@@ -131,3 +131,17 @@ def test_cli_strict_pipeline_rejects_fallback():
 
     assert result.exit_code == 1
     assert "has no pipeline model" in result.output
+
+
+def test_cli_trace_is_opt_in_and_bounded():
+    args = [
+        "analyze", "--hardware", "a100", "--mode", "pipeline",
+        "--format", "json", "matmul", "--M", "256", "--N", "256", "--K", "256",
+    ]
+    compact = CliRunner().invoke(main, args)
+    traced = CliRunner().invoke(main, args[:7] + ["--trace", "--trace-limit", "2"] + args[7:])
+
+    assert compact.exit_code == 0
+    assert '"sub_ops"' not in compact.output
+    assert traced.exit_code == 0
+    assert traced.output.count('"pipeline_stage"') == 2

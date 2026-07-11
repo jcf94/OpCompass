@@ -8,7 +8,15 @@ if TYPE_CHECKING:
     from opcompass.models import AnalysisResult
 
 
-def format_result(result: AnalysisResult, fmt: str = "table") -> str:
+MAX_TRACE_SUB_OPS = 5000
+
+
+def format_result(
+    result: AnalysisResult,
+    fmt: str = "table",
+    include_trace: bool = False,
+    trace_limit: int = 1000,
+) -> str:
     """Format an AnalysisResult as a human-readable string.
 
     Args:
@@ -20,7 +28,11 @@ def format_result(result: AnalysisResult, fmt: str = "table") -> str:
     """
     if fmt == "json":
         import json
-        return json.dumps(_result_to_dict(result), indent=2, ensure_ascii=False)
+        return json.dumps(
+            _result_to_dict(result, include_trace=include_trace, trace_limit=trace_limit),
+            indent=2,
+            ensure_ascii=False,
+        )
 
     if fmt == "csv":
         return _format_csv(result)
@@ -32,7 +44,13 @@ def format_result(result: AnalysisResult, fmt: str = "table") -> str:
 # Internal formatters
 # ---------------------------------------------------------------------------
 
-def _result_to_dict(result: AnalysisResult) -> dict:
+def _result_to_dict(
+    result: AnalysisResult,
+    include_trace: bool = False,
+    trace_limit: int = 1000,
+) -> dict:
+    if trace_limit < 1 or trace_limit > MAX_TRACE_SUB_OPS:
+        raise ValueError(f"trace_limit must be between 1 and {MAX_TRACE_SUB_OPS}")
     d = {
         "operator": result.operator,
         "hardware": result.hardware,
@@ -94,18 +112,6 @@ def _result_to_dict(result: AnalysisResult) -> dict:
     if result.pipeline_schedule is not None:
         ps = result.pipeline_schedule
         d["pipeline_schedule"] = {
-            "sub_ops": [
-                {
-                    "name": sop.name,
-                    "pipeline_stage": sop.pipeline_stage,
-                    "start_cycle": sop.start_cycle,
-                    "end_cycle": sop.end_cycle,
-                    "duration_cycles": sop.duration_cycles,
-                    "work_units": sop.work_units,
-                    "iteration": sop.iteration,
-                }
-                for sop in ps.sub_ops
-            ],
             "total_cycles_per_block": ps.total_cycles_per_block,
             "total_time_s": ps.total_time_s,
             "total_time_us": ps.total_time_s * 1e6,
@@ -116,7 +122,27 @@ def _result_to_dict(result: AnalysisResult) -> dict:
             "per_iteration_cycles": ps.per_iteration_cycles,
             "prologue_cycles": ps.prologue_cycles,
             "epilogue_cycles": ps.epilogue_cycles,
+            "trace": {
+                "included": include_trace,
+                "total_sub_ops": len(ps.sub_ops),
+                "returned_sub_ops": min(len(ps.sub_ops), trace_limit) if include_trace else 0,
+                "complete": include_trace and len(ps.sub_ops) <= trace_limit,
+                "limit": trace_limit,
+            },
         }
+        if include_trace:
+            d["pipeline_schedule"]["sub_ops"] = [
+                {
+                    "name": sop.name,
+                    "pipeline_stage": sop.pipeline_stage,
+                    "start_cycle": sop.start_cycle,
+                    "end_cycle": sop.end_cycle,
+                    "duration_cycles": sop.duration_cycles,
+                    "work_units": sop.work_units,
+                    "iteration": sop.iteration,
+                }
+                for sop in ps.sub_ops[:trace_limit]
+            ]
 
     if result.tiling_info is not None:
         ti = result.tiling_info

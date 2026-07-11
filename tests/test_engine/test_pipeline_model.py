@@ -560,3 +560,46 @@ def test_strict_pipeline_mode_rejects_non_pipeline_operator():
 
     assert exc_info.value.code == "unsupported_analysis_mode"
     assert exc_info.value.mode == AnalysisMode.PIPELINE
+
+
+def test_pipeline_json_is_compact_by_default_and_trace_is_bounded():
+    import json
+
+    from opcompass.engine.result import format_result
+
+    result = Analyzer().analyze(
+        get_operator("matmul")(), get_hardware("a100")(), DataType.FP16,
+        mode=AnalysisMode.PIPELINE, M=1024, N=1024, K=4096,
+    )
+
+    compact = json.loads(format_result(result, fmt="json"))
+    schedule = compact["pipeline_schedule"]
+    assert "sub_ops" not in schedule
+    assert schedule["trace"]["included"] is False
+    assert schedule["trace"]["total_sub_ops"] == len(result.pipeline_schedule.sub_ops)
+
+    traced = json.loads(format_result(
+        result, fmt="json", include_trace=True, trace_limit=3
+    ))["pipeline_schedule"]
+    assert len(traced["sub_ops"]) == 3
+    assert traced["trace"]["returned_sub_ops"] == 3
+    assert traced["trace"]["complete"] is False
+
+
+def test_default_pipeline_json_size_is_independent_of_k_trace_length():
+    from opcompass.engine.result import format_result
+
+    analyzer = Analyzer()
+    op = get_operator("matmul")()
+    hw = get_hardware("a100")()
+    short = analyzer.analyze(
+        op, hw, DataType.FP16, mode=AnalysisMode.PIPELINE,
+        M=256, N=256, K=256,
+    )
+    long = analyzer.analyze(
+        op, hw, DataType.FP16, mode=AnalysisMode.PIPELINE,
+        M=256, N=256, K=8192,
+    )
+
+    assert len(long.pipeline_schedule.sub_ops) > len(short.pipeline_schedule.sub_ops)
+    assert len(format_result(long, fmt="json")) < len(format_result(short, fmt="json")) + 1000

@@ -184,6 +184,8 @@ def info_cmd(operator_name: str):
 @click.option("--stage-count", type=int, default=None, help="Override pipeline stage count")
 @click.option("--warp-count", type=int, default=None, help="Override pipeline warps per block")
 @click.option("--strict/--allow-fallback", default=False, help="Reject unsupported requested modes instead of falling back")
+@click.option("--trace/--no-trace", default=False, help="Include a bounded pipeline sub-operation trace in JSON")
+@click.option("--trace-limit", type=click.IntRange(1, 5000), default=1000, show_default=True)
 @click.argument("operator_name")
 @click.pass_context
 def analyze_cmd(
@@ -200,6 +202,8 @@ def analyze_cmd(
     stage_count: int | None,
     warp_count: int | None,
     strict: bool,
+    trace: bool,
+    trace_limit: int,
     operator_name: str,
 ):
     """Analyze SOL performance for an operator.
@@ -255,7 +259,9 @@ def analyze_cmd(
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
 
-    click.echo(format_result(result, fmt=fmt))
+    click.echo(format_result(
+        result, fmt=fmt, include_trace=trace, trace_limit=trace_limit
+    ))
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +281,8 @@ def analyze_cmd(
 @click.option("--stage-count", type=int, default=None, help="Override pipeline stage count")
 @click.option("--warp-count", type=int, default=None, help="Override pipeline warps per block")
 @click.option("--strict/--allow-fallback", default=False, help="Reject unsupported requested modes instead of falling back")
+@click.option("--trace/--no-trace", default=False, help="Include a bounded pipeline sub-operation trace in JSON")
+@click.option("--trace-limit", type=click.IntRange(1, 5000), default=1000, show_default=True)
 @click.argument("operator_name")
 @click.pass_context
 def sweep_cmd(
@@ -291,6 +299,8 @@ def sweep_cmd(
     stage_count: int | None,
     warp_count: int | None,
     strict: bool,
+    trace: bool,
+    trace_limit: int,
     operator_name: str,
 ):
     """Sweep over multiple dimensions / hardware targets.
@@ -346,7 +356,9 @@ def sweep_cmd(
             except ValueError as e:
                 click.echo(f"Error: {e}", err=True)
                 sys.exit(1)
-            click.echo(format_result(result, fmt=fmt))
+            click.echo(format_result(
+                result, fmt=fmt, include_trace=trace, trace_limit=trace_limit
+            ))
             click.echo()
         return
 
@@ -378,7 +390,10 @@ def sweep_cmd(
     if fmt == "json":
         import json
         click.echo(json.dumps(
-            [_result_to_dict(r) for r in results], indent=2, ensure_ascii=False
+            [
+                _result_to_dict(r, include_trace=trace, trace_limit=trace_limit)
+                for r in results
+            ], indent=2, ensure_ascii=False
         ))
     elif fmt == "csv":
         click.echo("operator,hardware," + ",".join(axis_names) + "," + _csv_header())
@@ -401,9 +416,9 @@ def sweep_cmd(
 # Helpers for sweep output
 # ---------------------------------------------------------------------------
 
-def _result_to_dict(result) -> dict:
+def _result_to_dict(result, **kwargs) -> dict:
     from opcompass.engine.result import _result_to_dict
-    return _result_to_dict(result)
+    return _result_to_dict(result, **kwargs)
 
 
 def _csv_header() -> str:
