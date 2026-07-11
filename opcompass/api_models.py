@@ -56,6 +56,11 @@ class AnalyzeResponse(BaseModel):
     support_level: str
     schema_version: str
     model_id: str
+    implementation_version: str
+    implementation_revision: str
+    hardware_spec_version: str
+    evidence: Dict[str, Any]
+    uncertainty: Dict[str, Any]
     fallback: Optional[Dict[str, Any]]
     assumptions: List[str]
     warnings: List[str]

@@ -67,6 +67,25 @@ def _result_to_dict(
         "support_level": result.support_level.value,
         "schema_version": result.schema_version,
         "model_id": result.model_id,
+        "implementation_version": result.implementation_version,
+        "implementation_revision": result.implementation_revision,
+        "hardware_spec_version": result.hardware_spec_version,
+        "evidence": {
+            "coverage": result.evidence.coverage,
+            "sources": list(result.evidence.sources),
+        },
+        "uncertainty": {
+            "status": result.uncertainty.status,
+            "reason": result.uncertainty.reason,
+            "lower_time_us": (
+                result.uncertainty.lower_time_s * 1e6
+                if result.uncertainty.lower_time_s is not None else None
+            ),
+            "upper_time_us": (
+                result.uncertainty.upper_time_s * 1e6
+                if result.uncertainty.upper_time_s is not None else None
+            ),
+        },
         "fallback": (
             {
                 "from_mode": result.fallback.from_mode.value,
@@ -239,6 +258,8 @@ def _format_table(result: AnalysisResult) -> str:
         f"  Mode       : {result.requested_mode.value} → {result.executed_mode.value}",
         f"  Estimate   : {result.estimate_kind.value} ({result.support_level.value})",
         f"  Model      : {result.model_id} / schema {result.schema_version}",
+        f"  Build      : {result.implementation_version} @ {result.implementation_revision[:12]}",
+        f"  HW spec    : {result.hardware_spec_version}",
         "─" * 65,
         f"  Total FLOPs : {ops:>18s}",
         f"  Read bytes  : {read:>18s}",

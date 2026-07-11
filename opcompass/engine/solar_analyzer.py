@@ -128,7 +128,7 @@ class SolarAnalyzer:
             AnalysisResult with solar_data populated.
         """
         from opcompass.models import (
-            AnalysisMode, AnalysisResult, EstimateKind, SolarAnalysisData,
+            AnalysisMode, AnalysisResult, EstimateKind, EvidenceInfo, SolarAnalysisData,
             SupportLevel,
         )
 
@@ -226,6 +226,9 @@ class SolarAnalyzer:
             estimate_kind=EstimateKind.ANALYTICAL_MODEL,
             support_level=SupportLevel.FORMULA,
             model_id="solar_v1",
+            evidence=EvidenceInfo(
+                "analytical_model", ("solar_graph_model", "hardware_theoretical_peaks")
+            ),
             compute_unit_clock_hz=freq_hz,
             assumptions=["SOLAR fused-prefetched execution is used as the point estimate."],
             missing_effects=["Measured kernel calibration"],

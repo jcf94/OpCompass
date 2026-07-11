@@ -122,6 +122,19 @@ class Operator(ABC):
             if parameter.name in canonical
         }
 
+    def mode_capabilities(self) -> dict[str, str]:
+        """Return declared support, distinct from permissive fallback behavior."""
+        pipeline = (
+            type(self).get_ops_breakdown is not Operator.get_ops_breakdown
+            and type(self).get_tiling_strategy is not Operator.get_tiling_strategy
+        )
+        solar = type(self).get_solar_model_source is not Operator.get_solar_model_source
+        return {
+            "hierarchy_roofline": "formula",
+            "pipeline": "pipeline" if pipeline else "unsupported",
+            "solar": "formula" if solar else "unsupported",
+        }
+
     def compute_torch(self, inputs: list["torch.Tensor"], **kwargs) -> list["torch.Tensor"]:
         """Compute the operator using PyTorch (optional).
 

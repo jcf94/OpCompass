@@ -12,6 +12,11 @@ def test_runtime_versions_are_consistent():
     assert app.version == opcompass.__version__
 
 
+def test_implementation_revision_can_be_injected(monkeypatch):
+    monkeypatch.setenv("OPCOMPASS_GIT_REVISION", "release-build-revision")
+    assert opcompass.implementation_revision() == "release-build-revision"
+
+
 def test_runtime_resource_paths_exist():
     assert (Path(WEB_DIR) / "index.html").is_file()
     assert HARDWARE_TO_SOLAR_ARCH

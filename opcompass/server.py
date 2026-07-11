@@ -73,6 +73,7 @@ def api_list_operators() -> List[Dict[str, Any]]:
             "name": name,
             "description": inst.description,
             "param_dims": inst.param_dims,
+            "capabilities": inst.mode_capabilities(),
             "parameter_spec": [
                 {
                     "name": parameter.name,
@@ -113,6 +114,7 @@ def api_list_hardware() -> List[Dict[str, Any]]:
             "name": name,
             "vendor": inst.vendor,
             "description": inst.description,
+            "spec_version": inst.spec_version,
             "architecture": getattr(inst, "architecture", ""),
             "sm_version": getattr(inst, "sm_version", ""),
             "num_sms": inst.num_compute_units,

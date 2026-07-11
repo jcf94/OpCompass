@@ -115,6 +115,24 @@ class FallbackInfo:
     message: str
 
 
+@dataclass(frozen=True)
+class EvidenceInfo:
+    """What evidence supports a result, without inventing a confidence score."""
+
+    coverage: str
+    sources: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class UncertaintyInfo:
+    """Explicit uncertainty status and optional defensible interval."""
+
+    status: str = "unquantified"
+    reason: str = "No measurement-backed uncertainty model is available."
+    lower_time_s: float | None = None
+    upper_time_s: float | None = None
+
+
 class UnsupportedAnalysisError(ValueError):
     """Raised when strict mode forbids an unsupported requested model."""
 
@@ -361,6 +379,11 @@ class AnalysisResult:
     fallback: FallbackInfo | None = None
     schema_version: str = "0.2.0"
     model_id: str = "hierarchy_roofline_v1"
+    implementation_version: str = "unknown"
+    implementation_revision: str = "unknown"
+    hardware_spec_version: str = "legacy-v1"
+    evidence: EvidenceInfo = field(default_factory=lambda: EvidenceInfo("formula"))
+    uncertainty: UncertaintyInfo = field(default_factory=UncertaintyInfo)
     compute_unit_clock_hz: float = 0.0
     assumptions: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)

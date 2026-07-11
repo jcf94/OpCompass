@@ -14,6 +14,16 @@ def test_operator_api_exposes_typed_parameter_specs():
     assert all(item["type"] == "int" for item in matmul["parameter_spec"])
     assert all(item["required"] is True for item in matmul["parameter_spec"])
     assert all(item["minimum"] == 1 for item in matmul["parameter_spec"])
+    assert matmul["capabilities"] == {
+        "hierarchy_roofline": "formula",
+        "pipeline": "pipeline",
+        "solar": "formula",
+    }
+    assert operators["reduction"]["capabilities"] == {
+        "hierarchy_roofline": "formula",
+        "pipeline": "unsupported",
+        "solar": "unsupported",
+    }
 
 
 def test_analyze_api_returns_stable_validation_error():
@@ -48,6 +58,15 @@ def test_analyze_api_serializes_explicit_fallback_contract():
     assert result["estimate_kind"] == "theoretical_bound"
     assert result["support_level"] == "formula"
     assert result["schema_version"] == "0.2.0"
+    assert result["implementation_version"] == "0.2.0.dev0"
+    assert result["implementation_revision"]
+    assert result["hardware_spec_version"] == "legacy-v1"
+    assert result["evidence"] == {
+        "coverage": "formula",
+        "sources": ["operator_formula", "hardware_theoretical_peaks"],
+    }
+    assert result["uncertainty"]["status"] == "unquantified"
+    assert result["uncertainty"]["lower_time_us"] is None
     assert result["fallback"]["reason_code"] == "pipeline_model_unavailable"
 
 

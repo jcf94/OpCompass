@@ -40,7 +40,7 @@ class Analyzer:
         **dims: int,
     ) -> AnalysisResult:
         """Run SOL analysis and return an ``AnalysisResult``."""
-        from opcompass.models import AnalysisMode, AnalysisResult, PipelineConfig
+        from opcompass.models import AnalysisMode, AnalysisResult, EvidenceInfo, PipelineConfig
 
         if mode is None:
             mode = AnalysisMode.HIERARCHY_ROOFLINE
@@ -51,16 +51,16 @@ class Analyzer:
 
         # ── Solar mode: use SOLAR pytorch graph pipeline ──────────────
         if mode == AnalysisMode.SOLAR:
-            return self._ensure_finite_result(
-                self._analyze_solar(operator, hardware, dtype, dims)
+            return self._finalize_result(
+                self._analyze_solar(operator, hardware, dtype, dims), hardware
             )
 
         # ── Pipeline mode: use the cycle-based analytical scheduler ───
         if mode == AnalysisMode.PIPELINE:
-            return self._ensure_finite_result(
+            return self._finalize_result(
                 self._analyze_pipeline(
                     operator, hardware, dtype, pipeline_config, dims, strict=strict
-                )
+                ), hardware
             )
 
         # ── HIERARCHY_ROOFLINE mode ────────────────────────────────────
@@ -106,6 +106,9 @@ class Analyzer:
             requested_mode=mode,
             executed_mode=AnalysisMode.HIERARCHY_ROOFLINE,
             model_id="hierarchy_roofline_v1",
+            evidence=EvidenceInfo(
+                "formula", ("operator_formula", "hardware_theoretical_peaks")
+            ),
             compute_unit_clock_hz=hardware.compute_unit.clock_mhz * 1e6,
             assumptions=["Compute and memory phases use theoretical peak throughput."],
             missing_effects=["Kernel launch overhead", "Small-workload utilization"],
@@ -125,7 +128,17 @@ class Analyzer:
                 total_flops, read_bytes + write_bytes, hardware, dtype
             ),
         )
-        return self._ensure_finite_result(result)
+        return self._finalize_result(result, hardware)
+
+    @classmethod
+    def _finalize_result(cls, result, hardware):
+        """Stamp reproducibility metadata, then enforce the finite contract."""
+        from opcompass import __version__, implementation_revision
+
+        result.implementation_version = __version__
+        result.implementation_revision = implementation_revision()
+        result.hardware_spec_version = hardware.spec_version
+        return cls._ensure_finite_result(result)
 
     @staticmethod
     def _ensure_finite_result(result):
@@ -160,7 +173,7 @@ class Analyzer:
     ) -> AnalysisResult:
         """Run cycle-based analytical pipeline scheduling."""
         from opcompass.models import (
-            AnalysisMode, AnalysisResult, EstimateKind, FallbackInfo,
+            AnalysisMode, AnalysisResult, EstimateKind, EvidenceInfo, FallbackInfo,
             PipelineConfig, SupportLevel, UnsupportedAnalysisError,
         )
         from opcompass.engine.pipeline_model import schedule_pipeline
@@ -260,6 +273,9 @@ class Analyzer:
                     message=fallback_message,
                 ),
                 model_id="hierarchy_roofline_v1",
+                evidence=EvidenceInfo(
+                    "formula", ("operator_formula", "hardware_theoretical_peaks")
+                ),
                 compute_unit_clock_hz=hardware.compute_unit.clock_mhz * 1e6,
                 warnings=[fallback_message],
                 assumptions=["Compute and memory phases use theoretical peak throughput."],
@@ -345,6 +361,10 @@ class Analyzer:
             estimate_kind=EstimateKind.ANALYTICAL_MODEL,
             support_level=SupportLevel.PIPELINE,
             model_id="legacy_matmul_v1",
+            evidence=EvidenceInfo(
+                "analytical_model",
+                ("operator_formula", "hardware_theoretical_peaks", "modeled_stage_parameters"),
+            ),
             compute_unit_clock_hz=hardware.compute_unit.clock_mhz * 1e6,
             assumptions=["Cycle-based analytical schedule uses modeled stage throughput."],
             missing_effects=["Instruction-accurate issue behavior", "Kernel launch overhead"],
