@@ -9,6 +9,7 @@ Start with::
 # because FastAPI/Pydantic needs to evaluate type annotations at runtime.
 
 import os
+import sys
 from typing import Any, Dict, List
 
 from fastapi import FastAPI, HTTPException, Request
@@ -18,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 from opcompass.api_models import AnalyzeRequest, AnalyzeResponse
+from opcompass import __version__
 
 from opcompass.registry import (
     discover_hardware,
@@ -35,7 +37,7 @@ from opcompass.engine.result import _result_to_dict
 app = FastAPI(
     title="OpCompass API",
     description="SOL theoretical peak performance estimator for GPU operators",
-    version="0.1.0",
+    version=__version__,
 )
 
 
@@ -397,7 +399,12 @@ def api_analyze(body: AnalyzeRequest) -> Dict[str, Any]:
 # Static files (web UI)
 # ---------------------------------------------------------------------------
 
-WEB_DIR = os.path.join(os.path.dirname(__file__), "..", "web")
+_SOURCE_WEB_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "web"))
+_INSTALLED_WEB_DIR = os.path.join(sys.prefix, "opcompass", "web")
+WEB_DIR = next(
+    (path for path in (_SOURCE_WEB_DIR, _INSTALLED_WEB_DIR) if os.path.isdir(path)),
+    _SOURCE_WEB_DIR,
+)
 
 if os.path.isdir(WEB_DIR):
     app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")

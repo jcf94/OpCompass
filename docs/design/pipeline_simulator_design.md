@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-The pipeline simulator models **GPU kernel performance at the CTA (thread block) level** using a cycle-accurate, three-phase software pipelining approach. It targets the CUTLASS-style tiled GEMM execution pattern, where a large K dimension is split into slices, and memory loads for slice `k` are overlapped with computation (MMA) for slice `k-1`.
+The pipeline simulator models **GPU kernel performance at the CTA (thread block) level** using a cycle-based analytical, three-phase software-pipelining approach. It is not instruction- or cycle-accurate hardware simulation. It targets the CUTLASS-style tiled GEMM execution pattern, where a large K dimension is split into slices, and memory loads for slice `k` are overlapped with computation (MMA) for slice `k-1`.
 
 The primary entry point is `schedule_pipeline()` in `opcompass/engine/pipeline_model.py`, which takes a decomposed set of sub-operations and places them on a timeline with explicit prologue/steady-state/epilogue phases.
 

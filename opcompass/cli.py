@@ -16,6 +16,7 @@ from typing import Any
 
 import click
 
+from opcompass import __version__
 from opcompass.registry import discover_hardware, discover_operators, get_hardware, get_operator
 from opcompass.models import AnalysisMode, DataType, PipelineConfig
 from opcompass.engine.analyzer import Analyzer
@@ -104,7 +105,7 @@ def _build_pipeline_config(
 # ---------------------------------------------------------------------------
 
 @click.group()
-@click.version_option(version="0.1.0", prog_name="compass")
+@click.version_option(version=__version__, prog_name="compass")
 def main():
     """OpCompass — SOL theoretical peak performance estimator for GPU operators."""
 

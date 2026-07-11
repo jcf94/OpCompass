@@ -1,0 +1,57 @@
+{
+  "matmul_pipeline": {
+    "a100": {
+      "sol_time_us": 4.153191489361702,
+      "sol_tflops": 8.079192131147542,
+      "bottleneck": "async_copy_load",
+      "candidate_name": "ampere_128x64x32_w4_s2",
+      "tile": [128, 64, 32],
+      "total_cycles_per_block": 5856,
+      "num_k_iterations": 8,
+      "prologue_cycles": 1312,
+      "per_iteration_cycles": 408,
+      "epilogue_cycles": 1696
+    },
+    "h100": {
+      "sol_time_us": 5.227777777777778,
+      "sol_tflops": 6.418488586609989,
+      "bottleneck": "async_copy_load",
+      "candidate_name": "hopper_128x128x64_w4_s3",
+      "tile": [128, 128, 64],
+      "total_cycles_per_block": 10351,
+      "num_k_iterations": 4,
+      "prologue_cycles": 4564,
+      "per_iteration_cycles": 1406,
+      "epilogue_cycles": 2981
+    },
+    "b200": {
+      "sol_time_us": 2.9470000000000005,
+      "sol_tflops": 11.385962673905667,
+      "bottleneck": "async_copy_load",
+      "candidate_name": "blackwell_128x128x64_w4_s3",
+      "tile": [128, 128, 64],
+      "total_cycles_per_block": 5894,
+      "num_k_iterations": 4,
+      "prologue_cycles": 2804,
+      "per_iteration_cycles": 720,
+      "epilogue_cycles": 1655
+    }
+  },
+  "pipeline_fallback": {
+    "operator": "reduction",
+    "hardware": "a100",
+    "shapes": {"N": 4096, "D": 256},
+    "requested_mode": "pipeline",
+    "executed_mode": "hierarchy_roofline",
+    "estimate_kind": "theoretical_bound",
+    "support_level": "formula",
+    "model_id": "hierarchy_roofline_v1",
+    "fallback_reason_code": "pipeline_model_unavailable",
+    "total_flops": 4096,
+    "total_read_bytes": 8192,
+    "total_write_bytes": 32,
+    "sol_time_us": 0.004096,
+    "sol_tflops": 1.0,
+    "bottleneck": "memory_read"
+  }
+}

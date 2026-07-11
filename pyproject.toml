@@ -1,6 +1,36 @@
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "opcompass"
+version = "0.2.0.dev0"
+description = "GPU operator Speed-of-Light performance estimator"
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [{name = "OpCompass Authors"}]
+dependencies = [
+    "click>=8.0",
+    "fastapi>=0.100",
+    "uvicorn>=0.23",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "pytest-cov"]
+
+[project.scripts]
+compass = "opcompass.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["opcompass", "opcompass.*"]
+
+[tool.setuptools.package-data]
+opcompass = ["configs/solar_arch/*.yaml"]
+
+[tool.setuptools.data-files]
+"opcompass/web" = ["web/index.html"]
+"opcompass/web/css" = ["web/css/*.css"]
+"opcompass/web/js" = ["web/js/*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

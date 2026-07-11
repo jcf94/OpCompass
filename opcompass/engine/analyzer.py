@@ -55,7 +55,7 @@ class Analyzer:
                 self._analyze_solar(operator, hardware, dtype, dims)
             )
 
-        # ── Pipeline mode: use the new DAG-based scheduler ────────────
+        # ── Pipeline mode: use the cycle-based analytical scheduler ───
         if mode == AnalysisMode.PIPELINE:
             return self._ensure_finite_result(
                 self._analyze_pipeline(
@@ -158,7 +158,7 @@ class Analyzer:
     def _analyze_pipeline(
         self, operator, hardware, dtype, pipeline_config, dims, strict=False
     ) -> AnalysisResult:
-        """Run pipeline analysis using DAG-based scheduling."""
+        """Run cycle-based analytical pipeline scheduling."""
         from opcompass.models import (
             AnalysisMode, AnalysisResult, EstimateKind, FallbackInfo,
             PipelineConfig, SupportLevel, UnsupportedAnalysisError,
