@@ -176,7 +176,7 @@ class AnalyzeResponse(ApiModel):
 
     operator: str
     hardware: str
-    shapes: Dict[str, int]
+    shapes: Dict[str, Union[int, float, str, bool]]
     dtype: DataType
     mode: AnalysisMode
     requested_mode: AnalysisMode
@@ -210,6 +210,8 @@ class AnalyzeResponse(ApiModel):
     tiling_info: Optional[TilingResponse] = None
     pipeline_memory_breakdown: Optional[PipelineMemoryResponse] = None
     pipeline_candidates: Optional[List[PipelineCandidateResponse]] = None
+    pipeline_ir_schedule: Optional[Dict[str, object]] = None
+    pipeline_legacy_comparison: Optional[Dict[str, Union[str, int, float]]] = None
     solar_data: Optional[SolarResponse] = None
 
 

@@ -110,7 +110,7 @@ def test_cli_pipeline_fallback_is_explicit_in_json():
         main,
         [
             "analyze", "--hardware", "a100", "--mode", "pipeline",
-            "--format", "json", "reduction", "--N", "4096", "--D", "256",
+            "--format", "json", "elementwise", "--N", "4096",
         ],
     )
 
@@ -125,7 +125,7 @@ def test_cli_strict_pipeline_rejects_fallback():
         main,
         [
             "analyze", "--hardware", "a100", "--mode", "pipeline", "--strict",
-            "reduction", "--N", "4096", "--D", "256",
+            "elementwise", "--N", "4096",
         ],
     )
 

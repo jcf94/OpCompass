@@ -84,7 +84,7 @@ Key Blackwell improvements over Hopper (H100)
 
 from __future__ import annotations
 
-from opcompass.hardware.base import Hardware
+from opcompass.hardware.base import Hardware, HardwareFact
 from opcompass.models import (
     ComputeUnit,
     DataType,
@@ -359,6 +359,11 @@ class NvidiaBlackwell(Hardware):
 
 
 class NvidiaB200(NvidiaBlackwell):
+    spec_version = "nvidia-b200-v1"
+    facts = (
+        HardwareFact("memory.capacity", 192, "GB", "https://resources.nvidia.com/en-us-blackwell-architecture", "NVIDIA Blackwell Architecture", status="published"),
+        HardwareFact("pipeline.latency_cycles", "model overlay", "cycles", "", "OpCompass analytical assumptions", source_kind="model", status="assumption"),
+    )
     """NVIDIA B200 (SXM) — GB100 dual-die GPU, Blackwell architecture.
 
     Full-chip dense peaks, converted from NVIDIA's current HGX B200

@@ -80,7 +80,7 @@ Key Hopper improvements over Ampere (A100)
 
 from __future__ import annotations
 
-from opcompass.hardware.base import Hardware
+from opcompass.hardware.base import Hardware, HardwareFact
 from opcompass.models import (
     ComputeUnit,
     DataType,
@@ -328,6 +328,11 @@ class NvidiaHopper(Hardware):
 
 
 class NvidiaH100SXM5(NvidiaHopper):
+    spec_version = "nvidia-h100-sxm-v1"
+    facts = (
+        HardwareFact("compute_unit.count", 132, "SM", "https://resources.nvidia.com/en-us-tensor-core/nvidia-h100-tensor-c", "NVIDIA H100 Tensor Core GPU Datasheet"),
+        HardwareFact("memory.bandwidth", 3.35e12, "byte/s", "https://resources.nvidia.com/en-us-tensor-core/nvidia-h100-tensor-c", "NVIDIA H100 Tensor Core GPU Datasheet"),
+    )
     """NVIDIA H100 80 GB (SXM5) — GH100 GPU, Hopper architecture.
 
     The flagship SXM5 form factor with NVLink and HBM3.  Highest
@@ -407,6 +412,11 @@ class NvidiaH100SXM5(NvidiaHopper):
 
 
 class NvidiaH100PCIe(NvidiaHopper):
+    spec_version = "nvidia-h100-pcie-v1"
+    facts = (
+        HardwareFact("compute_unit.count", 114, "SM", "https://resources.nvidia.com/en-us-tensor-core/nvidia-h100-tensor-c", "NVIDIA H100 Tensor Core GPU Datasheet"),
+        HardwareFact("memory.bandwidth", 2.0e12, "byte/s", "https://resources.nvidia.com/en-us-tensor-core/nvidia-h100-tensor-c", "NVIDIA H100 Tensor Core GPU Datasheet"),
+    )
     """NVIDIA H100 80 GB (PCIe) — GH100 GPU, Hopper architecture.
 
     The dual-slot PCIe form factor for standard server compatibility.

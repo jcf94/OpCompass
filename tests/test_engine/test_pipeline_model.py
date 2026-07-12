@@ -535,8 +535,8 @@ def test_non_pipeline_operator_reports_explicit_fallback():
     from opcompass.models import EstimateKind, SupportLevel
 
     result = Analyzer().analyze(
-        get_operator("reduction")(), get_hardware("a100")(), DataType.FP16,
-        mode=AnalysisMode.PIPELINE, N=4096, D=256,
+        get_operator("elementwise")(), get_hardware("a100")(), DataType.FP16,
+        mode=AnalysisMode.PIPELINE, N=4096,
     )
 
     assert result.requested_mode == AnalysisMode.PIPELINE
@@ -554,8 +554,8 @@ def test_strict_pipeline_mode_rejects_non_pipeline_operator():
 
     with pytest.raises(UnsupportedAnalysisError) as exc_info:
         Analyzer().analyze(
-            get_operator("reduction")(), get_hardware("a100")(), DataType.FP16,
-            mode=AnalysisMode.PIPELINE, strict=True, N=4096, D=256,
+            get_operator("elementwise")(), get_hardware("a100")(), DataType.FP16,
+            mode=AnalysisMode.PIPELINE, strict=True, N=4096,
         )
 
     assert exc_info.value.code == "unsupported_analysis_mode"

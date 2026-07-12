@@ -119,6 +119,132 @@ def get_inputs():
     # Pipeline-level decomposition
     # ------------------------------------------------------------------
 
+    def get_pipeline_program(self, hardware, dtype, pipeline_config=None, **dims):
+        """Build the V0.3 explicit, operator-independent scheduling IR.
+
+        Stage names are identifiers only: dependencies, resource occupancy,
+        work units, and loop repetition are declared directly in the graph.
+        """
+        from opcompass.engine.pipeline_ir import (
+            Buffer, BufferAccess, Edge, Launch, Loop, MemoryAccess, Node,
+            PipelineProgram, Resource, ResourceDemand, ResourceKind,
+            SyncPrimitive, Work,
+        )
+
+        pipeline_config = pipeline_config or PipelineConfig()
+        tiling = self.get_tiling_strategy(
+            hardware, dtype, pipeline_config=pipeline_config, **dims
+        )
+        sub_ops = self.get_ops_breakdown(
+            dtype, hardware, pipeline_config, **dims
+        )
+        recurring = [sub_op for sub_op in sub_ops if sub_op.is_recurring]
+        stages = {stage.name: stage for stage in hardware.compute_unit.pipeline}
+        resource_kinds = {
+            "async_copy_load": ResourceKind.COPY, "global_read": ResourceKind.HBM,
+            "shared_load": ResourceKind.SHARED, "mma": ResourceKind.COMPUTE,
+            "wgmma": ResourceKind.COMPUTE, "umma": ResourceKind.COMPUTE,
+            "fma_alu": ResourceKind.COMPUTE,
+        }
+        resources = [
+            Resource(name, kind=resource_kinds.get(name, ResourceKind.GENERIC))
+            for name in sorted({s.pipeline_stage for s in recurring})
+        ]
+        nodes = []
+        for sub_op in recurring:
+            stage = stages.get(sub_op.pipeline_stage)
+            amount = sub_op.flops / 2 if sub_op.flops else sub_op.read_bytes + sub_op.write_bytes
+            unit = "fma" if sub_op.flops else "bytes"
+            throughput = stage.throughput_per_cycle if stage is not None else 1
+            if sub_op.flops:
+                peak = hardware.get_peak_flops(dtype)
+                cu = hardware.compute_unit
+                if peak > 0 and cu.clock_mhz > 0 and cu.count > 0:
+                    throughput = peak / (2 * cu.clock_mhz * 1e6 * cu.count)
+                if pipeline_config.sparsity_2_4_enabled:
+                    throughput *= 2
+            duration = max(1, math.ceil(amount / throughput)) if amount and throughput > 0 else 0
+            memory_access = None
+            accesses = ()
+            if not sub_op.flops:
+                path = ((ResourceKind.HBM, ResourceKind.L2, ResourceKind.COPY,
+                         ResourceKind.SHARED) if "async" in sub_op.pipeline_stage
+                        else (ResourceKind.SHARED, ResourceKind.REGISTER))
+                byte_count = sub_op.read_bytes + sub_op.write_bytes
+                memory_access = MemoryAccess(
+                    path, byte_count, 128, math.ceil(byte_count / 128),
+                    "cta_order" if path[0] == ResourceKind.HBM else "resident",
+                )
+                buffer_name = "tile_A" if sub_op.name.endswith("_A") else "tile_B"
+                accesses = (BufferAccess(
+                    buffer_name,
+                    "write" if path[0] == ResourceKind.HBM else "read",
+                ),)
+            nodes.append(Node(
+                sub_op.name,
+                duration,
+                Work(amount, unit),
+                (ResourceDemand(sub_op.pipeline_stage),),
+                accesses,
+                memory_access,
+            ))
+        node_names = {node.name for node in nodes}
+        edges = list(
+            Edge(dependency, sub_op.name)
+            for sub_op in recurring
+            for dependency in sub_op.depends_on
+            if dependency in node_names
+        )
+        arch = getattr(hardware, "architecture", "").lower()
+        sync_primitives = {
+            "ampere": (SyncPrimitive.CP_ASYNC_COMMIT, SyncPrimitive.CP_ASYNC_WAIT,
+                        SyncPrimitive.SYNCTHREADS),
+            "hopper": (SyncPrimitive.MBARRIER, SyncPrimitive.WGMMA_COMMIT,
+                        SyncPrimitive.WGMMA_WAIT),
+            "blackwell": (SyncPrimitive.MBARRIER, SyncPrimitive.UMMA_COMMIT,
+                           SyncPrimitive.UMMA_WAIT),
+        }.get(arch, (SyncPrimitive.SYNCTHREADS,))
+        resources.append(Resource("synchronization", kind=ResourceKind.SYNCHRONIZATION))
+        previous = None
+        for primitive in sync_primitives:
+            name = primitive.value
+            nodes.append(Node(
+                name, 1, Work(1, "operations"),
+                (ResourceDemand("synchronization"),), synchronization=primitive,
+            ))
+            if previous is not None:
+                edges.append(Edge(previous, name))
+            previous = name
+        load_nodes = [sub_op.name for sub_op in recurring if not sub_op.depends_on]
+        compute_nodes = [sub_op.name for sub_op in recurring if sub_op.flops]
+        for name in load_nodes:
+            edges.append(Edge(name, sync_primitives[0].value))
+        for name in compute_nodes:
+            edges.append(Edge(sync_primitives[-1].value, name))
+        compute_nodes = [sub_op.name for sub_op in recurring if sub_op.flops]
+        edges += [Edge(name, name, iteration_distance=1) for name in compute_nodes]
+        grid_m = math.ceil(dims["M"] / tiling.block_m)
+        grid_n = math.ceil(dims["N"] / tiling.block_n)
+        tiled_elements = grid_m * tiling.block_m * grid_n * tiling.block_n
+        return PipelineProgram(
+            resources=tuple(resources),
+            nodes=tuple(nodes),
+            edges=tuple(edges),
+            buffers=(
+                Buffer("tile_A", tiling.block_m * tiling.block_k * dtype.byte_size,
+                       tiling.stage_count),
+                Buffer("tile_B", tiling.block_k * tiling.block_n * dtype.byte_size,
+                       tiling.stage_count),
+            ),
+            loop=Loop(iterations=max(1, math.ceil(dims["K"] / tiling.block_k))),
+            launch=Launch(
+                grid_size=grid_m * grid_n,
+                resident_blocks=max(1, hardware.compute_unit.max_thread_blocks_per_unit),
+                compute_units=max(1, hardware.compute_unit.count),
+                tail_fraction=(dims["M"] * dims["N"]) / tiled_elements,
+            ),
+        )
+
     def get_tile_constraints(self, hardware=None, dtype=None) -> dict:
         """Return CTA tile granularity derived from the compute instruction.
 

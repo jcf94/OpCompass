@@ -90,7 +90,7 @@ Key Ampere improvements over Volta (V100)
 
 from __future__ import annotations
 
-from opcompass.hardware.base import Hardware
+from opcompass.hardware.base import Hardware, HardwareFact
 from opcompass.models import (
     ComputeUnit,
     DataType,
@@ -315,6 +315,11 @@ class NvidiaAmpere(Hardware):
 
 
 class NvidiaA100(NvidiaAmpere):
+    spec_version = "nvidia-a100-v1"
+    facts = (
+        HardwareFact("compute_unit.count", 108, "SM", "https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet-nvidia-us-2188504-web.pdf", "NVIDIA A100 Tensor Core GPU Datasheet"),
+        HardwareFact("memory.bandwidth", 2.0e12, "byte/s", "https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet-nvidia-us-2188504-web.pdf", "NVIDIA A100 Tensor Core GPU Datasheet"),
+    )
     """NVIDIA A100 80 GB (SXM4) — GA100 GPU, Ampere architecture.
 
     Full-chip peak (108 SMs @ 1410 MHz):

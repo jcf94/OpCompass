@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "opcompass"
-version = "0.2.0.dev0"
+version = "0.6.0.dev0"
 description = "GPU operator Speed-of-Light performance estimator"
 readme = "README.md"
 requires-python = ">=3.8"
