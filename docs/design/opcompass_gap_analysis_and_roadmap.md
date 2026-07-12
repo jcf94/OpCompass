@@ -669,6 +669,13 @@ Exit criteria:
 
 ### V0.3 — Explicit pipeline IR and generic resource scheduler
 
+Implementation status (2026-07-12): the generic IR, validation, deterministic
+resource scheduler, compact trace windows, synthetic fixtures, and matmul IR
+emission are implemented. Pipeline results expose a labeled legacy comparison
+while the established phase/epilogue timeline remains available for numerical
+compatibility; see [`../releases/v0.3.md`](../releases/v0.3.md) for the precise
+boundary and known limitations.
+
 Goal: remove matmul name matching and make dependencies/resources operational.
 
 Work packages:

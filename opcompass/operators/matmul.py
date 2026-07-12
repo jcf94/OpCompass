@@ -119,6 +119,62 @@ def get_inputs():
     # Pipeline-level decomposition
     # ------------------------------------------------------------------
 
+    def get_pipeline_program(self, hardware, dtype, pipeline_config=None, **dims):
+        """Build the V0.3 explicit, operator-independent scheduling IR.
+
+        Stage names are identifiers only: dependencies, resource occupancy,
+        work units, and loop repetition are declared directly in the graph.
+        """
+        from opcompass.engine.pipeline_ir import (
+            Edge, Loop, Node, PipelineProgram, Resource, ResourceDemand, Work,
+        )
+
+        pipeline_config = pipeline_config or PipelineConfig()
+        tiling = self.get_tiling_strategy(
+            hardware, dtype, pipeline_config=pipeline_config, **dims
+        )
+        sub_ops = self.get_ops_breakdown(
+            dtype, hardware, pipeline_config, **dims
+        )
+        recurring = [sub_op for sub_op in sub_ops if sub_op.is_recurring]
+        stages = {stage.name: stage for stage in hardware.compute_unit.pipeline}
+        resources = tuple(Resource(name) for name in sorted({s.pipeline_stage for s in recurring}))
+        nodes = []
+        for sub_op in recurring:
+            stage = stages.get(sub_op.pipeline_stage)
+            amount = sub_op.flops / 2 if sub_op.flops else sub_op.read_bytes + sub_op.write_bytes
+            unit = "fma" if sub_op.flops else "bytes"
+            throughput = stage.throughput_per_cycle if stage is not None else 1
+            if sub_op.flops:
+                peak = hardware.get_peak_flops(dtype)
+                cu = hardware.compute_unit
+                if peak > 0 and cu.clock_mhz > 0 and cu.count > 0:
+                    throughput = peak / (2 * cu.clock_mhz * 1e6 * cu.count)
+                if pipeline_config.sparsity_2_4_enabled:
+                    throughput *= 2
+            duration = max(1, math.ceil(amount / throughput)) if amount and throughput > 0 else 0
+            nodes.append(Node(
+                sub_op.name,
+                duration,
+                Work(amount, unit),
+                (ResourceDemand(sub_op.pipeline_stage),),
+            ))
+        node_names = {node.name for node in nodes}
+        edges = tuple(
+            Edge(dependency, sub_op.name)
+            for sub_op in recurring
+            for dependency in sub_op.depends_on
+            if dependency in node_names
+        )
+        compute_nodes = [sub_op.name for sub_op in recurring if sub_op.flops]
+        edges += tuple(Edge(name, name, iteration_distance=1) for name in compute_nodes)
+        return PipelineProgram(
+            resources=resources,
+            nodes=tuple(nodes),
+            edges=edges,
+            loop=Loop(iterations=max(1, math.ceil(dims["K"] / tiling.block_k))),
+        )
+
     def get_tile_constraints(self, hardware=None, dtype=None) -> dict:
         """Return CTA tile granularity derived from the compute instruction.
 

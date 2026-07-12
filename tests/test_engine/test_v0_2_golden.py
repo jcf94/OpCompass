@@ -32,7 +32,7 @@ def test_matmul_pipeline_compact_golden(hardware_name):
     assert serialized["estimate_kind"] == "analytical_model"
     assert serialized["support_level"] == "pipeline"
     assert serialized["model_id"] == "legacy_matmul_v1"
-    assert serialized["implementation_version"] == "0.2.0.dev0"
+    assert serialized["implementation_version"] == "0.3.0.dev0"
     assert serialized["implementation_revision"]
     assert serialized["hardware_spec_version"] == "legacy-v1"
     assert serialized["evidence"]["coverage"] == "analytical_model"

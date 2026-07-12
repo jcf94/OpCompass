@@ -61,8 +61,8 @@ def test_analyze_api_serializes_explicit_fallback_contract():
     assert result["executed_mode"] == "hierarchy_roofline"
     assert result["estimate_kind"] == "theoretical_bound"
     assert result["support_level"] == "formula"
-    assert result["schema_version"] == "0.2.0"
-    assert result["implementation_version"] == "0.2.0.dev0"
+    assert result["schema_version"] == "0.3.0"
+    assert result["implementation_version"] == "0.3.0.dev0"
     assert result["implementation_revision"]
     assert result["hardware_spec_version"] == "legacy-v1"
     assert result["evidence"] == {
@@ -242,7 +242,7 @@ def test_http_analyze_success_uses_typed_json_contract():
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("application/json")
     payload = response.json()
-    assert payload["schema_version"] == "0.2.0"
+    assert payload["schema_version"] == "0.3.0"
     assert payload["requested_mode"] == "hierarchy_roofline"
     assert payload["roofline_data"]["peak_flops"] > 0
 

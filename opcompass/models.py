@@ -417,7 +417,7 @@ class AnalysisResult:
     estimate_kind: EstimateKind = EstimateKind.THEORETICAL_BOUND
     support_level: SupportLevel = SupportLevel.FORMULA
     fallback: FallbackInfo | None = None
-    schema_version: str = "0.2.0"
+    schema_version: str = "0.3.0"
     model_id: str = "hierarchy_roofline_v1"
     implementation_version: str = "unknown"
     implementation_revision: str = "unknown"
@@ -454,6 +454,8 @@ class AnalysisResult:
     tiling_info: TilingInfo | None = None
     pipeline_memory_breakdown: dict[str, float] = field(default_factory=dict)
     pipeline_candidates: list[PipelineKernelCandidate] = field(default_factory=list)
+    pipeline_ir_schedule: Any | None = None
+    pipeline_legacy_comparison: dict[str, float | int | str] = field(default_factory=dict)
 
     # ——— solar-specific results (None for non-solar modes) ———
     solar_data: SolarAnalysisData | None = None

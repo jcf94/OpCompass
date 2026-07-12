@@ -365,6 +365,22 @@ class Analyzer:
         pipeline_memory_breakdown = self._build_pipeline_memory_breakdown(
             sub_ops, schedule, read_bytes, write_bytes
         )
+        pipeline_ir_schedule = None
+        pipeline_legacy_comparison = {}
+        if hasattr(operator, "get_pipeline_program"):
+            from opcompass.engine.pipeline_ir import schedule as schedule_ir
+
+            pipeline_ir_schedule = schedule_ir(operator.get_pipeline_program(
+                hardware, dtype, pipeline_config=pipeline_config, **dims
+            ))
+            legacy_cycles = schedule.total_cycles_per_block
+            ir_cycles = pipeline_ir_schedule.total_cycles
+            pipeline_legacy_comparison = {
+                "legacy_cycles_per_block": legacy_cycles,
+                "ir_cycles_per_block": ir_cycles,
+                "ir_to_legacy_ratio": ir_cycles / legacy_cycles if legacy_cycles else 0.0,
+                "status": "expected_model_semantics_change",
+            }
 
         return AnalysisResult(
             operator=operator.name,
@@ -409,6 +425,8 @@ class Analyzer:
             tiling_info=tiling,
             pipeline_memory_breakdown=pipeline_memory_breakdown,
             pipeline_candidates=pipeline_candidates,
+            pipeline_ir_schedule=pipeline_ir_schedule,
+            pipeline_legacy_comparison=pipeline_legacy_comparison,
         )
 
     # ------------------------------------------------------------------

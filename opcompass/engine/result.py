@@ -130,6 +130,20 @@ def _result_to_dict(
             }
             for i, c in enumerate(result.pipeline_candidates)
         ]
+    if result.pipeline_ir_schedule is not None:
+        ir = result.pipeline_ir_schedule
+        d["pipeline_ir_schedule"] = {
+            "total_cycles": ir.total_cycles,
+            "loop_iterations": ir.loop_iterations,
+            "resource_busy_cycles": ir.resource_busy_cycles,
+            "trace": {
+                "included": False,
+                "total_nodes": len(ir.entries),
+                "returned_nodes": 0,
+            },
+        }
+    if result.pipeline_legacy_comparison:
+        d["pipeline_legacy_comparison"] = result.pipeline_legacy_comparison
 
     # Pipeline-specific fields
     if result.pipeline_schedule is not None:

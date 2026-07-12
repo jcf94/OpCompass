@@ -56,5 +56,5 @@ def test_pipeline_table_prints_real_phase_times():
     )
     assert float(match.group(1)) > 0
     assert re.search(r"Epilogue\s+[\d,]+\s+[\d.]+ µs", table)
-    assert "Build      : 0.2.0.dev0 @" in table
+    assert "Build      : 0.3.0.dev0 @" in table
     assert "HW spec    : legacy-v1" in table
