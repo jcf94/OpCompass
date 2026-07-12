@@ -25,7 +25,7 @@ def test_operator_api_exposes_typed_parameter_specs():
     }
     assert operators["reduction"]["capabilities"] == {
         "hierarchy_roofline": "formula",
-        "pipeline": "unsupported",
+        "pipeline": "pipeline",
         "solar": "unsupported",
     }
 
@@ -50,19 +50,19 @@ def test_analyze_api_returns_stable_validation_error():
 
 def test_analyze_api_serializes_explicit_fallback_contract():
     result = api_analyze({
-        "operator": "reduction",
+        "operator": "elementwise",
         "hardware": "a100",
         "dtype": "fp16",
         "mode": "pipeline",
-        "dims": {"N": 4096, "D": 256},
+        "dims": {"N": 4096},
     })
 
     assert result["requested_mode"] == "pipeline"
     assert result["executed_mode"] == "hierarchy_roofline"
     assert result["estimate_kind"] == "theoretical_bound"
     assert result["support_level"] == "formula"
-    assert result["schema_version"] == "0.5.0"
-    assert result["implementation_version"] == "0.5.0.dev0"
+    assert result["schema_version"] == "0.6.0"
+    assert result["implementation_version"] == "0.6.0.dev0"
     assert result["implementation_revision"]
     assert result["hardware_spec_version"] == "nvidia-a100-v1"
     assert result["evidence"] == {
@@ -77,12 +77,12 @@ def test_analyze_api_serializes_explicit_fallback_contract():
 def test_analyze_api_strict_mode_returns_stable_unsupported_error():
     with pytest.raises(HTTPException) as exc_info:
         api_analyze({
-            "operator": "reduction",
+            "operator": "elementwise",
             "hardware": "a100",
             "dtype": "fp16",
             "mode": "pipeline",
             "strict": True,
-            "dims": {"N": 4096, "D": 256},
+            "dims": {"N": 4096},
         })
 
     assert exc_info.value.status_code == 422
@@ -242,7 +242,7 @@ def test_http_analyze_success_uses_typed_json_contract():
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("application/json")
     payload = response.json()
-    assert payload["schema_version"] == "0.5.0"
+    assert payload["schema_version"] == "0.6.0"
     assert payload["requested_mode"] == "hierarchy_roofline"
     assert payload["roofline_data"]["peak_flops"] > 0
 
@@ -262,10 +262,10 @@ def test_http_analyze_rejects_invalid_pydantic_request():
 
 def test_http_analyze_exposes_fallback_and_strict_rejection():
     body = {
-        "operator": "reduction",
+        "operator": "elementwise",
         "hardware": "a100",
         "mode": "pipeline",
-        "dims": {"N": 4096, "D": 256},
+        "dims": {"N": 4096},
     }
     fallback = client.post("/api/analyze", json=body)
     rejected = client.post("/api/analyze", json={**body, "strict": True})

@@ -32,7 +32,7 @@ def test_matmul_pipeline_compact_golden(hardware_name):
     assert serialized["estimate_kind"] == "analytical_model"
     assert serialized["support_level"] == "pipeline"
     assert serialized["model_id"] == "legacy_matmul_v1"
-    assert serialized["implementation_version"] == "0.5.0.dev0"
+    assert serialized["implementation_version"] == "0.6.0.dev0"
     assert serialized["implementation_revision"]
     assert serialized["hardware_spec_version"] == {
         "a100": "nvidia-a100-v1",
@@ -57,20 +57,16 @@ def test_matmul_pipeline_compact_golden(hardware_name):
     assert "sub_ops" not in schedule
 
 
-def test_pipeline_fallback_compact_golden():
+def test_reduction_pipeline_supersedes_v0_2_fallback_golden():
     result = Analyzer().analyze(
         get_operator("reduction")(), get_hardware("a100")(), DataType.FP16,
         mode=AnalysisMode.PIPELINE, N=4096, D=256,
     )
     serialized = _result_to_dict(result)
-    expected = GOLDEN["pipeline_fallback"]
-
-    for field in (
-        "operator", "hardware", "shapes", "requested_mode", "executed_mode",
-        "estimate_kind", "support_level", "model_id", "total_flops",
-        "total_read_bytes", "total_write_bytes", "bottleneck",
-    ):
-        assert serialized[field] == expected[field]
-    assert serialized["fallback"]["reason_code"] == expected["fallback_reason_code"]
-    assert serialized["sol_time_us"] == pytest.approx(expected["sol_time_us"])
-    assert serialized["sol_tflops"] == pytest.approx(expected["sol_tflops"])
+    assert serialized["operator"] == "reduction"
+    assert serialized["requested_mode"] == "pipeline"
+    assert serialized["executed_mode"] == "pipeline"
+    assert serialized["support_level"] == "pipeline"
+    assert serialized["fallback"] is None
+    assert serialized["tiling_info"]["candidate_name"] == "block"
+    assert serialized["pipeline_ir_schedule"]["total_cycles"] > 0

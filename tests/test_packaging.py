@@ -8,7 +8,7 @@ from opcompass.server import WEB_DIR, app
 
 
 def test_runtime_versions_are_consistent():
-    assert opcompass.__version__ == "0.5.0.dev0"
+    assert opcompass.__version__ == "0.6.0.dev0"
     assert app.version == opcompass.__version__
 
 

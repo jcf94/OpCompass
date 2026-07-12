@@ -1,6 +1,7 @@
 """Uniform public parameter contracts for built-in operators."""
 
 from opcompass.operators.base import Operator
+from opcompass.models import ParameterKind
 from opcompass.registry import discover_operators
 
 
@@ -10,8 +11,16 @@ def test_all_builtin_operators_declare_explicit_specs():
         operator = operator_class()
         assert operator.spec.name == name
         assert operator.spec.parameters
-        assert all(parameter.value_type is int for parameter in operator.spec.parameters)
-        assert all(parameter.minimum == 1 for parameter in operator.spec.parameters)
+        assert all(
+            parameter.value_type is int and parameter.minimum == 1
+            for parameter in operator.spec.parameters
+            if parameter.kind == ParameterKind.SHAPE
+        )
+        assert all(
+            parameter.value_type in {int, str}
+            for parameter in operator.spec.parameters
+            if parameter.kind == ParameterKind.IMPLEMENTATION
+        )
 
 
 def test_builtin_specs_canonicalize_in_declaration_order():

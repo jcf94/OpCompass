@@ -768,6 +768,11 @@ Exit criteria:
 
 ### V0.6 — Reduction and normalization pipelines
 
+Implementation status (2026-07-12): warp/block/two-pass reduction and
+LayerNorm/RMSNorm one-pass/online/two-pass decompositions emit the generic IR,
+including partial traffic, barriers, rsqrt, affine, conversion, and stores.
+See [`../releases/v0.6.md`](../releases/v0.6.md).
+
 Goal: prove the scheduler handles non-GEMM synchronization and multi-phase
 algorithms.
 

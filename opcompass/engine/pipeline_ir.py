@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 import heapq
+import math
 from typing import Iterable
 
 
@@ -265,6 +266,29 @@ def validate_program(program: PipelineProgram) -> None:
 
     if issues:
         raise PipelineIRValidationError(issues)
+
+
+def program_from_sub_ops(sub_ops, resource_kinds, iterations=1, launch=Launch()):
+    """Adapt an operator decomposition without embedding operator knowledge."""
+    resources = tuple(
+        Resource(name, kind=resource_kinds.get(name, ResourceKind.GENERIC))
+        for name in sorted({sub_op.pipeline_stage for sub_op in sub_ops})
+    )
+    nodes = []
+    for sub_op in sub_ops:
+        amount = sub_op.flops if sub_op.flops else sub_op.read_bytes + sub_op.write_bytes
+        nodes.append(Node(
+            sub_op.name, max(1, math.ceil(amount)) if amount else 0,
+            Work(amount, "flops" if sub_op.flops else "bytes"),
+            (ResourceDemand(sub_op.pipeline_stage),),
+        ))
+    names = {node.name for node in nodes}
+    edges = tuple(
+        Edge(dependency, sub_op.name)
+        for sub_op in sub_ops for dependency in sub_op.depends_on
+        if dependency in names
+    )
+    return PipelineProgram(resources, tuple(nodes), edges, loop=Loop(iterations), launch=launch)
 
 
 def schedule(program: PipelineProgram) -> CompactSchedule:

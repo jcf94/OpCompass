@@ -176,7 +176,7 @@ class AnalyzeResponse(ApiModel):
 
     operator: str
     hardware: str
-    shapes: Dict[str, int]
+    shapes: Dict[str, Union[int, float, str, bool]]
     dtype: DataType
     mode: AnalysisMode
     requested_mode: AnalysisMode

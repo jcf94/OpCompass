@@ -407,7 +407,7 @@ class AnalysisResult:
 
     operator: str
     hardware: str
-    shapes: dict[str, int] = field(default_factory=dict)
+    shapes: dict[str, Any] = field(default_factory=dict)
     dtype: DataType = DataType.FP16
     mode: AnalysisMode = AnalysisMode.HIERARCHY_ROOFLINE
 
@@ -417,7 +417,7 @@ class AnalysisResult:
     estimate_kind: EstimateKind = EstimateKind.THEORETICAL_BOUND
     support_level: SupportLevel = SupportLevel.FORMULA
     fallback: FallbackInfo | None = None
-    schema_version: str = "0.5.0"
+    schema_version: str = "0.6.0"
     model_id: str = "hierarchy_roofline_v1"
     implementation_version: str = "unknown"
     implementation_revision: str = "unknown"
