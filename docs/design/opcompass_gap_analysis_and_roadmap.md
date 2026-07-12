@@ -634,6 +634,9 @@ semantics change.
 
 ### V0.2 — Trustworthy contract and baseline
 
+Implementation handoff and remaining release work:
+[`v0_2_session_handoff.md`](v0_2_session_handoff.md).
+
 Goal: make every successful result valid, finite, reproducible, and honest
 about which model ran.
 

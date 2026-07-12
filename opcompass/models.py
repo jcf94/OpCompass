@@ -7,6 +7,48 @@ from enum import Enum
 from typing import Any
 
 
+class ParameterKind(str, Enum):
+    """How an operator parameter affects an analysis request."""
+
+    SHAPE = "shape"
+    IMPLEMENTATION = "implementation"
+
+
+@dataclass(frozen=True)
+class OperatorParameterSpec:
+    """Typed contract for one concrete operator parameter."""
+
+    name: str
+    description: str
+    aliases: tuple[str, ...] = ()
+    value_type: type = int
+    required: bool = True
+    default: Any = None
+    minimum: int | float | None = 1
+    multiple_of: int | None = None
+    kind: ParameterKind = ParameterKind.SHAPE
+
+
+@dataclass(frozen=True)
+class OperatorSpec:
+    """Stable, machine-readable parameter contract for an operator."""
+
+    name: str
+    parameters: tuple[OperatorParameterSpec, ...]
+
+
+class OperatorValidationError(ValueError):
+    """Typed invalid-workload error shared by API, CLI, and engine users."""
+
+    code = "invalid_operator_parameters"
+
+    def __init__(self, operator: str, issues: list[dict[str, str]]):
+        self.operator = operator
+        self.issues = issues
+        message = "; ".join(issue["message"] for issue in issues)
+        super().__init__(f"Invalid parameters for {operator}: {message}")
+
+
 class DataType(str, Enum):
     """Supported numerical data types."""
 
@@ -43,6 +85,114 @@ class AnalysisMode(str, Enum):
     HIERARCHY_ROOFLINE = "hierarchy_roofline"  # Roofline with multi-tier memory hierarchy
     PIPELINE = "pipeline"                     # Pipeline stage-level modeling
     SOLAR = "solar"                           # SOLAR torch graph analysis (via 3rdparty/SOLAR)
+
+
+class EstimateKind(str, Enum):
+    """Semantic meaning of the reported runtime."""
+
+    THEORETICAL_BOUND = "theoretical_bound"
+    ANALYTICAL_MODEL = "analytical_model"
+    CALIBRATED = "calibrated"
+    LEARNED = "learned"
+
+
+class SupportLevel(str, Enum):
+    """Highest evidence/model support available for this result."""
+
+    UNSUPPORTED = "unsupported"
+    FORMULA = "formula"
+    PIPELINE = "pipeline"
+    VALIDATED = "validated"
+
+
+@dataclass(frozen=True)
+class FallbackInfo:
+    """Records an explicit change from the requested analysis mode."""
+
+    from_mode: AnalysisMode
+    to_mode: AnalysisMode
+    reason_code: str
+    message: str
+
+
+@dataclass(frozen=True)
+class EvidenceInfo:
+    """What evidence supports a result, without inventing a confidence score."""
+
+    coverage: str
+    sources: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class UncertaintyInfo:
+    """Explicit uncertainty status and optional defensible interval."""
+
+    status: str = "unquantified"
+    reason: str = "No measurement-backed uncertainty model is available."
+    lower_time_s: float | None = None
+    upper_time_s: float | None = None
+
+
+class UnsupportedAnalysisError(ValueError):
+    """Raised when strict mode forbids an unsupported requested model."""
+
+    code = "unsupported_analysis_mode"
+
+    def __init__(self, operator: str, mode: AnalysisMode, message: str):
+        self.operator = operator
+        self.mode = mode
+        self.message = message
+        super().__init__(message)
+
+
+class NonFiniteResultError(RuntimeError):
+    """Raised before a result containing NaN or infinity can succeed."""
+
+    code = "non_finite_analysis_result"
+
+    def __init__(self, field_path: str):
+        self.field_path = field_path
+        super().__init__(f"Analysis produced a non-finite numeric field: {field_path}")
+
+
+class BackendUnavailableError(RuntimeError):
+    """Raised when an explicitly requested optional backend cannot run."""
+
+    code = "optional_backend_unavailable"
+
+    def __init__(self, backend: str, missing_dependencies: list[str]):
+        self.backend = backend
+        self.missing_dependencies = missing_dependencies
+        super().__init__(
+            f"{backend} requires additional dependencies: "
+            f"{', '.join(missing_dependencies)}"
+        )
+
+
+class InfeasibleCandidateError(ValueError):
+    """Raised when no requested pipeline candidate satisfies constraints."""
+
+    code = "infeasible_pipeline_candidate"
+
+    def __init__(self, message: str):
+        self.message = message
+        super().__init__(message)
+
+
+class UnsupportedDataTypeError(ValueError):
+    """Raised when a hardware target has no throughput model for a dtype."""
+
+    code = "unsupported_dtype"
+
+    def __init__(self, hardware: str, dtype: DataType, supported: list[DataType]):
+        self.hardware = hardware
+        self.dtype = dtype
+        self.supported = supported
+        values = ", ".join(item.value for item in supported)
+        super().__init__(
+            f"Hardware '{hardware}' does not support dtype '{dtype.value}'. "
+            f"Supported dtypes: {values}"
+        )
 
 
 @dataclass
@@ -261,6 +411,24 @@ class AnalysisResult:
     dtype: DataType = DataType.FP16
     mode: AnalysisMode = AnalysisMode.HIERARCHY_ROOFLINE
 
+    # ——— v0.2 result identity and semantics ———
+    requested_mode: AnalysisMode | None = None
+    executed_mode: AnalysisMode | None = None
+    estimate_kind: EstimateKind = EstimateKind.THEORETICAL_BOUND
+    support_level: SupportLevel = SupportLevel.FORMULA
+    fallback: FallbackInfo | None = None
+    schema_version: str = "0.2.0"
+    model_id: str = "hierarchy_roofline_v1"
+    implementation_version: str = "unknown"
+    implementation_revision: str = "unknown"
+    hardware_spec_version: str = "legacy-v1"
+    evidence: EvidenceInfo = field(default_factory=lambda: EvidenceInfo("formula"))
+    uncertainty: UncertaintyInfo = field(default_factory=UncertaintyInfo)
+    compute_unit_clock_hz: float = 0.0
+    assumptions: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    missing_effects: list[str] = field(default_factory=list)
+
     # ——— fundamental quantities ———
     total_flops: int = 0
     total_read_bytes: int = 0
@@ -289,6 +457,12 @@ class AnalysisResult:
 
     # ——— solar-specific results (None for non-solar modes) ———
     solar_data: SolarAnalysisData | None = None
+
+    def __post_init__(self) -> None:
+        if self.requested_mode is None:
+            self.requested_mode = self.mode
+        if self.executed_mode is None:
+            self.executed_mode = self.mode
 
     def summary(self) -> str:
         """Return a one-line summary string."""

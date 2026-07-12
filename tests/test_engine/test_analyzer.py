@@ -1,8 +1,86 @@
 """Test the SOL analyzer end-to-end."""
 
+import pytest
+
 from opcompass.registry import get_operator, get_hardware
 from opcompass.models import DataType, AnalysisMode
+from opcompass.models import OperatorValidationError
 from opcompass.engine.analyzer import Analyzer
+
+
+@pytest.mark.parametrize(
+    "dims,reason,parameter",
+    [
+        ({"M": 128, "N": 128}, "missing", "K"),
+        ({"M": 0, "N": 128, "K": 128}, "minimum", "M"),
+        ({"M": -1, "N": 128, "K": 128}, "minimum", "M"),
+        ({"M": 128, "N": 128, "K": 128, "typo": 1}, "unknown", "typo"),
+        ({"M": "128", "N": 128, "K": 128}, "type", "M"),
+    ],
+)
+def test_analyzer_rejects_invalid_matmul_dimensions(dims, reason, parameter):
+    op = get_operator("matmul")()
+    hw = get_hardware("a100")()
+
+    with pytest.raises(OperatorValidationError) as exc_info:
+        Analyzer().analyze(op, hw, DataType.FP16, **dims)
+
+    assert exc_info.value.code == "invalid_operator_parameters"
+    assert {issue["reason"] for issue in exc_info.value.issues} == {reason}
+    assert exc_info.value.issues[0]["parameter"] == parameter
+
+
+def test_elementwise_dimension_default_is_canonicalized():
+    op = get_operator("elementwise")()
+    result = Analyzer().analyze(op, get_hardware("a100")(), DataType.FP16, N=1024)
+
+    assert result.shapes == {"N": 1024, "ops_per_element": 1}
+    assert result.total_flops == 1024
+
+
+def test_matmul_dimensions_use_canonical_spec_order():
+    result = Analyzer().analyze(
+        get_operator("matmul")(), get_hardware("a100")(), DataType.FP16,
+        K=32, M=128, N=64,
+    )
+
+    assert list(result.shapes) == ["M", "N", "K"]
+
+
+def test_reduction_requires_exact_rows():
+    op = get_operator("reduction")()
+
+    with pytest.raises(OperatorValidationError, match="must divide"):
+        Analyzer().analyze(op, get_hardware("a100")(), DataType.FP16, N=100, D=32)
+
+
+def test_analyzer_rejects_non_finite_success_result():
+    from opcompass.models import AnalysisResult, NonFiniteResultError
+
+    result = AnalysisResult(
+        operator="test", hardware="test", sol_time_s=float("inf")
+    )
+
+    with pytest.raises(NonFiniteResultError) as exc_info:
+        Analyzer._ensure_finite_result(result)
+
+    assert exc_info.value.code == "non_finite_analysis_result"
+    assert exc_info.value.field_path == "result.sol_time_s"
+
+
+def test_analyzer_rejects_unsupported_hardware_dtype_before_modeling():
+    from opcompass.models import UnsupportedDataTypeError
+
+    with pytest.raises(UnsupportedDataTypeError) as exc_info:
+        Analyzer().analyze(
+            get_operator("matmul")(), get_hardware("a100")(), DataType.FP8,
+            M=128, N=128, K=128,
+        )
+
+    assert exc_info.value.code == "unsupported_dtype"
+    assert exc_info.value.hardware == "a100"
+    assert exc_info.value.dtype == DataType.FP8
+    assert DataType.FP16 in exc_info.value.supported
 
 
 def test_matmul_a100_fp16_hierarchy_roofline():
@@ -77,9 +155,6 @@ def test_matmul_fp32_memory_bound():
 # ---------------------------------------------------------------------------
 # Solar mode tests
 # ---------------------------------------------------------------------------
-
-import pytest
-
 
 def _has_solar_deps():
     """Return True if torch, torchview, and pyyaml are available."""
@@ -169,6 +244,7 @@ def test_solar_mode_requires_solar_model_source():
 
 
 @pytest.mark.skipif(not _has_solar_deps(), reason="torch/torchview/pyyaml not installed")
+@pytest.mark.solar
 def test_matmul_solar_a100_end_to_end():
     """Full end-to-end solar analysis of matmul on A100.
 
@@ -202,6 +278,7 @@ def test_matmul_solar_a100_end_to_end():
 
 
 @pytest.mark.skipif(not _has_solar_deps(), reason="torch/torchview/pyyaml not installed")
+@pytest.mark.solar
 @pytest.mark.parametrize("hardware_name,dtype", _solar_matmul_comparison_cases())
 def test_matmul_hierarchy_roofline_matches_solar_across_hardware_and_dtypes(hardware_name, dtype):
     """Matmul should produce nearly identical roofline results in hierarchy and SOLAR modes."""
@@ -231,6 +308,7 @@ def test_matmul_hierarchy_roofline_matches_solar_across_hardware_and_dtypes(hard
 
 
 @pytest.mark.skipif(not _has_solar_deps(), reason="torch/torchview/pyyaml not installed")
+@pytest.mark.solar
 def test_matmul_solar_h100_end_to_end():
     """Full end-to-end solar analysis of matmul on H100."""
     from opcompass.models import DataType, AnalysisMode
@@ -250,6 +328,7 @@ def test_matmul_solar_h100_end_to_end():
 
 
 @pytest.mark.skipif(not _has_solar_deps(), reason="torch/torchview/pyyaml not installed")
+@pytest.mark.solar
 def test_matmul_solar_cli_integration():
     """Verify the CLI and result formatting work for solar mode."""
     from opcompass.models import DataType, AnalysisMode

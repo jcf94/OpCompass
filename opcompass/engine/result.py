@@ -4,11 +4,23 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import csv
+import io
+import json
+
 if TYPE_CHECKING:
     from opcompass.models import AnalysisResult
 
 
-def format_result(result: AnalysisResult, fmt: str = "table") -> str:
+MAX_TRACE_SUB_OPS = 5000
+
+
+def format_result(
+    result: AnalysisResult,
+    fmt: str = "table",
+    include_trace: bool = False,
+    trace_limit: int = 1000,
+) -> str:
     """Format an AnalysisResult as a human-readable string.
 
     Args:
@@ -19,8 +31,12 @@ def format_result(result: AnalysisResult, fmt: str = "table") -> str:
         Formatted string.
     """
     if fmt == "json":
-        import json
-        return json.dumps(_result_to_dict(result), indent=2, ensure_ascii=False)
+        return json.dumps(
+            _result_to_dict(result, include_trace=include_trace, trace_limit=trace_limit),
+            indent=2,
+            ensure_ascii=False,
+            allow_nan=False,
+        )
 
     if fmt == "csv":
         return _format_csv(result)
@@ -32,13 +48,56 @@ def format_result(result: AnalysisResult, fmt: str = "table") -> str:
 # Internal formatters
 # ---------------------------------------------------------------------------
 
-def _result_to_dict(result: AnalysisResult) -> dict:
+def _result_to_dict(
+    result: AnalysisResult,
+    include_trace: bool = False,
+    trace_limit: int = 1000,
+) -> dict:
+    if trace_limit < 1 or trace_limit > MAX_TRACE_SUB_OPS:
+        raise ValueError(f"trace_limit must be between 1 and {MAX_TRACE_SUB_OPS}")
     d = {
         "operator": result.operator,
         "hardware": result.hardware,
         "shapes": result.shapes,
         "dtype": result.dtype.value,
         "mode": result.mode.value,
+        "requested_mode": result.requested_mode.value,
+        "executed_mode": result.executed_mode.value,
+        "estimate_kind": result.estimate_kind.value,
+        "support_level": result.support_level.value,
+        "schema_version": result.schema_version,
+        "model_id": result.model_id,
+        "implementation_version": result.implementation_version,
+        "implementation_revision": result.implementation_revision,
+        "hardware_spec_version": result.hardware_spec_version,
+        "evidence": {
+            "coverage": result.evidence.coverage,
+            "sources": list(result.evidence.sources),
+        },
+        "uncertainty": {
+            "status": result.uncertainty.status,
+            "reason": result.uncertainty.reason,
+            "lower_time_us": (
+                result.uncertainty.lower_time_s * 1e6
+                if result.uncertainty.lower_time_s is not None else None
+            ),
+            "upper_time_us": (
+                result.uncertainty.upper_time_s * 1e6
+                if result.uncertainty.upper_time_s is not None else None
+            ),
+        },
+        "fallback": (
+            {
+                "from_mode": result.fallback.from_mode.value,
+                "to_mode": result.fallback.to_mode.value,
+                "reason_code": result.fallback.reason_code,
+                "message": result.fallback.message,
+            }
+            if result.fallback else None
+        ),
+        "assumptions": result.assumptions,
+        "warnings": result.warnings,
+        "missing_effects": result.missing_effects,
         "total_flops": result.total_flops,
         "total_read_bytes": result.total_read_bytes,
         "total_write_bytes": result.total_write_bytes,
@@ -76,18 +135,6 @@ def _result_to_dict(result: AnalysisResult) -> dict:
     if result.pipeline_schedule is not None:
         ps = result.pipeline_schedule
         d["pipeline_schedule"] = {
-            "sub_ops": [
-                {
-                    "name": sop.name,
-                    "pipeline_stage": sop.pipeline_stage,
-                    "start_cycle": sop.start_cycle,
-                    "end_cycle": sop.end_cycle,
-                    "duration_cycles": sop.duration_cycles,
-                    "work_units": sop.work_units,
-                    "iteration": sop.iteration,
-                }
-                for sop in ps.sub_ops
-            ],
             "total_cycles_per_block": ps.total_cycles_per_block,
             "total_time_s": ps.total_time_s,
             "total_time_us": ps.total_time_s * 1e6,
@@ -98,7 +145,27 @@ def _result_to_dict(result: AnalysisResult) -> dict:
             "per_iteration_cycles": ps.per_iteration_cycles,
             "prologue_cycles": ps.prologue_cycles,
             "epilogue_cycles": ps.epilogue_cycles,
+            "trace": {
+                "included": include_trace,
+                "total_sub_ops": len(ps.sub_ops),
+                "returned_sub_ops": min(len(ps.sub_ops), trace_limit) if include_trace else 0,
+                "complete": include_trace and len(ps.sub_ops) <= trace_limit,
+                "limit": trace_limit,
+            },
         }
+        if include_trace:
+            d["pipeline_schedule"]["sub_ops"] = [
+                {
+                    "name": sop.name,
+                    "pipeline_stage": sop.pipeline_stage,
+                    "start_cycle": sop.start_cycle,
+                    "end_cycle": sop.end_cycle,
+                    "duration_cycles": sop.duration_cycles,
+                    "work_units": sop.work_units,
+                    "iteration": sop.iteration,
+                }
+                for sop in ps.sub_ops[:trace_limit]
+            ]
 
     if result.tiling_info is not None:
         ti = result.tiling_info
@@ -188,7 +255,11 @@ def _format_table(result: AnalysisResult) -> str:
         f"  Hardware   : {result.hardware}",
         f"  Shapes     : {result.shapes}",
         f"  Dtype      : {result.dtype.value}",
-        f"  Mode       : {result.mode.value}",
+        f"  Mode       : {result.requested_mode.value} → {result.executed_mode.value}",
+        f"  Estimate   : {result.estimate_kind.value} ({result.support_level.value})",
+        f"  Model      : {result.model_id} / schema {result.schema_version}",
+        f"  Build      : {result.implementation_version} @ {result.implementation_revision[:12]}",
+        f"  HW spec    : {result.hardware_spec_version}",
         "─" * 65,
         f"  Total FLOPs : {ops:>18s}",
         f"  Read bytes  : {read:>18s}",
@@ -201,6 +272,8 @@ def _format_table(result: AnalysisResult) -> str:
         f"  ★ SOL time   : {sol_us:8.1f} µs  ({result.sol_tflops:.1f} TFLOPS)",
         f"  ★ Bottleneck : {result.bottleneck}",
     ]
+    if result.fallback is not None:
+        lines.append(f"  ⚠ Fallback : {result.fallback.message}")
     if is_pipeline:
         lines.append("  Note: Read/Compute/Write above are non-additive because pipeline stages overlap")
     lines.append("═" * 65)
@@ -221,9 +294,9 @@ def _format_table(result: AnalysisResult) -> str:
             "─" * 65,
             f"  {'Phase':<20} {'Cycles':>10}  {'Time':>10}",
             f"  {'─'*20} {'─'*10}  {'─'*10}",
-            f"  {'Prologue':<20} {ps.prologue_cycles:>10,}  {ps.prologue_cycles * 1e3 / result.compute_unit_clock_hz if hasattr(result, 'compute_unit_clock_hz') else 0:>9.1f} µs",
-            f"  {'Steady state ×' + str(ps.num_k_iterations - 1) if ps.num_k_iterations > 1 else 'Steady state':<20} {ps.per_iteration_cycles * max(0, ps.num_k_iterations - 1):>10,}",
-            f"  {'Epilogue':<20} {ps.epilogue_cycles:>10,}",
+            f"  {'Prologue':<20} {ps.prologue_cycles:>10,}  {ps.prologue_cycles / result.compute_unit_clock_hz * 1e6:>9.3f} µs",
+            f"  {'Steady state ×' + str(ps.num_k_iterations - 1) if ps.num_k_iterations > 1 else 'Steady state':<20} {ps.per_iteration_cycles * max(0, ps.num_k_iterations - 1):>10,}  {ps.per_iteration_cycles * max(0, ps.num_k_iterations - 1) / result.compute_unit_clock_hz * 1e6:>9.3f} µs",
+            f"  {'Epilogue':<20} {ps.epilogue_cycles:>10,}  {ps.epilogue_cycles / result.compute_unit_clock_hz * 1e6:>9.3f} µs",
             "─" * 65,
             f"  Total cycles/block : {ps.total_cycles_per_block:,}",
             f"  Grid size          : {ps.grid_size} blocks",
@@ -304,6 +377,27 @@ def _format_table(result: AnalysisResult) -> str:
 
 def _format_csv(result: AnalysisResult) -> str:
     d = _result_to_dict(result)
-    header = ",".join(d.keys())
-    values = ",".join(str(v) for v in d.values())
-    return f"{header}\n{values}"
+    row = {
+        "schema_version": d["schema_version"],
+        "operator": d["operator"],
+        "hardware": d["hardware"],
+        "shapes_json": json.dumps(d["shapes"], separators=(",", ":")),
+        "dtype": d["dtype"],
+        "requested_mode": d["requested_mode"],
+        "executed_mode": d["executed_mode"],
+        "estimate_kind": d["estimate_kind"],
+        "support_level": d["support_level"],
+        "model_id": d["model_id"],
+        "fallback_reason_code": d["fallback"]["reason_code"] if d["fallback"] else "",
+        "total_flops": d["total_flops"],
+        "total_read_bytes": d["total_read_bytes"],
+        "total_write_bytes": d["total_write_bytes"],
+        "sol_time_us": d["sol_time_us"],
+        "sol_tflops": d["sol_tflops"],
+        "bottleneck": d["bottleneck"],
+    }
+    stream = io.StringIO(newline="")
+    writer = csv.DictWriter(stream, fieldnames=list(row), lineterminator="\n")
+    writer.writeheader()
+    writer.writerow(row)
+    return stream.getvalue().rstrip("\n")

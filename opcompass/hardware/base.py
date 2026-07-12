@@ -384,6 +384,7 @@ class Hardware(ABC):
     name: str = ""
     vendor: str = ""
     description: str = ""
+    spec_version: str = "legacy-v1"
 
     # Subclasses override these with actual objects
     memory: MemoryHierarchy

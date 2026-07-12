@@ -363,6 +363,8 @@ function triggerAnalysis(immediate) {
 }
 
 function renderResults(data) {
+    renderModelContract(data);
+
     // Metric cards
     $solTime.textContent = data.sol_time_us.toFixed(1);
     $solTflops.textContent = data.sol_tflops.toFixed(1);
@@ -398,7 +400,7 @@ function renderResults(data) {
     const detailTableCard = document.getElementById("detail-table-container");
     const cardRow = document.querySelector("#results-panel > .card-row");
 
-    if (data.mode === "pipeline") {
+    if (data.executed_mode === "pipeline") {
         rooflineCard?.classList.add("hidden");
         if (detailTableCard && cardRow && detailTableCard.parentElement !== cardRow) {
             cardRow.appendChild(detailTableCard);
@@ -426,12 +428,31 @@ function renderResults(data) {
     // Solar-specific rendering
     if (data.solar_data) {
         renderSolarResults(data.solar_data);
+    } else {
+        document.getElementById("solar-results")?.classList.add("hidden");
     }
 
     // Pipeline-specific rendering
     if (typeof PipelineUI !== "undefined") {
         PipelineUI.render(data);
     }
+}
+
+function renderModelContract(data) {
+    if (typeof ResultContract === "undefined") return;
+    const contract = ResultContract.build(data);
+    const panel = document.getElementById("model-contract");
+    panel.classList.toggle("is-fallback", contract.fallback);
+    document.getElementById("contract-route").textContent = contract.route;
+    document.getElementById("contract-status").textContent = contract.status;
+    document.getElementById("contract-estimate").textContent = `${contract.estimate} / ${contract.support}`;
+    document.getElementById("contract-model").textContent = contract.model;
+    document.getElementById("contract-build").textContent = `${contract.build} · HW ${contract.hardwareSpec}`;
+    document.getElementById("contract-evidence").textContent = contract.evidence;
+    document.getElementById("contract-evidence-sources").textContent = contract.evidenceSources;
+    document.getElementById("contract-uncertainty").textContent = contract.uncertainty;
+    document.getElementById("contract-uncertainty-reason").textContent = contract.uncertaintyReason;
+    document.getElementById("contract-message").textContent = contract.message;
 }
 
 function renderSolarResults(sd) {

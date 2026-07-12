@@ -14,7 +14,7 @@ The FLOPs count is the same as standard attention; the I/O model
 reflects the tiled, fused approach (reads Q, K, V once each; writes O once).
 """
 
-from opcompass.models import DataType
+from opcompass.models import DataType, OperatorParameterSpec, OperatorSpec
 from opcompass.operators.base import Operator
 
 
@@ -42,6 +42,15 @@ class FlashAttention(Operator):
             "S": "Sequence length",
             "D": "Head dimension (d_k = d_v)",
         }
+
+    @property
+    def spec(self) -> OperatorSpec:
+        return OperatorSpec(self.name, (
+            OperatorParameterSpec("B", "Batch size"),
+            OperatorParameterSpec("H", "Number of attention heads"),
+            OperatorParameterSpec("S", "Sequence length"),
+            OperatorParameterSpec("D", "Head dimension shared by Q, K, and V"),
+        ))
 
     def compute_flops(
         self, B: int = 0, H: int = 0, S: int = 0, D: int = 0, **kwargs

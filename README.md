@@ -19,7 +19,7 @@ The project is aimed at answering questions such as:
 
 | Mode | Purpose | Current status |
 |------|---------|----------------|
-| `hierarchy_roofline` | Multi-tier roofline estimate using FLOPs and memory hierarchy bandwidth | Available for all operators with FLOP/IO formulas |
+| `hierarchy_roofline` | Theoretical roofline bound using operator FLOPs/unique IO and HBM bandwidth | Formula support for all declared operators; not yet a true hierarchy model |
 | `pipeline` | CTA-level pipeline schedule with sub-op timelines, tiling, occupancy, stage bottlenecks, and memory breakdowns | Detailed implementation for matmul |
 | `solar` | SOLAR graph analysis through vendored `3rdparty/SOLAR` | Available where the SOLAR path supports the workload |
 
@@ -36,7 +36,7 @@ Currently included:
 - `elementwise`: roofline-style FLOP/IO model.
 - `reduction`: roofline-style FLOP/IO model.
 
-Pipeline mode is currently matmul-first. Other operators fall back to non-pipeline analysis until they define `get_ops_breakdown()`.
+Pipeline mode is currently matmul-first. In permissive mode, other operators return an explicit `pipeline_model_unavailable` fallback to `hierarchy_roofline`; `--strict` rejects the request instead.
 
 ### Hardware Models
 
@@ -57,6 +57,9 @@ Supported NVIDIA generations and targets include:
 Hardware models include compute peaks, memory hierarchy, SM resources, occupancy limits, pipeline stages, and architecture-specific stage descriptions.
 
 ### Matmul Pipeline Model
+
+This is a cycle-based analytical schedule, not a cycle-accurate GPU simulator
+or a general dependency-driven DAG scheduler.
 
 Pipeline matmul mode currently models:
 
@@ -89,6 +92,9 @@ Install for local development:
 ```bash
 pip install -e .
 ```
+
+Package metadata is defined in `pyproject.toml`. Wheel and source distributions
+include the Web UI and SOLAR architecture YAML runtime assets.
 
 Install development dependencies:
 
@@ -202,6 +208,20 @@ Run tests:
 pytest
 ```
 
+The default collection is limited to first-party tests under `tests/`; vendored
+`3rdparty/SOLAR` tests are not included in the OpCompass pass count. Run the
+optional SOLAR integration subset separately when its dependencies are installed:
+
+```bash
+pytest -m solar
+```
+
+Run the fast first-party suite without optional SOLAR integration tests with:
+
+```bash
+pytest -m "not solar"
+```
+
 Run focused pipeline tests:
 
 ```bash
@@ -222,7 +242,7 @@ Minimum roofline support requires:
 
 - `name`
 - `description`
-- `param_dims`
+- an explicit `OperatorSpec` describing every accepted parameter
 - `compute_flops()`
 - `compute_io_bytes()`
 
@@ -250,6 +270,11 @@ For useful pipeline mode, also define:
 - architecture-specific pipeline stages and descriptions
 
 ## TODO
+
+The current release contract and caveats are documented in the
+[v0.2 release notes](docs/releases/v0.2.md),
+[schema compatibility policy](docs/reference/schema_compatibility.md), and
+[known limitations](docs/reference/known_limitations.md).
 
 Near-term modeling work:
 

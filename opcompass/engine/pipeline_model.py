@@ -1,4 +1,4 @@
-"""Pipeline model — DAG-based cycle-level scheduling for block-level analysis.
+"""Pipeline model — cycle-based analytical scheduling for block-level analysis.
 
 Produces a ``PipelineSchedule`` that maps each SubOp to a start/end cycle
 on the timeline, respecting DAG dependencies and hardware overlap rules

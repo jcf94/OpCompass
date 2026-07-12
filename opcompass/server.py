@@ -9,11 +9,17 @@ Start with::
 # because FastAPI/Pydantic needs to evaluate type annotations at runtime.
 
 import os
+import sys
 from typing import Any, Dict, List
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import ValidationError
+
+from opcompass.api_models import AnalyzeRequest, AnalyzeResponse, ErrorResponse
+from opcompass import __version__
 
 from opcompass.registry import (
     discover_hardware,
@@ -21,15 +27,47 @@ from opcompass.registry import (
     get_hardware,
     get_operator,
 )
-from opcompass.models import AnalysisMode, DataType, PipelineConfig
+from opcompass.models import (
+    AnalysisMode, BackendUnavailableError, DataType, InfeasibleCandidateError,
+    NonFiniteResultError, OperatorValidationError, PipelineConfig,
+    UnsupportedAnalysisError, UnsupportedDataTypeError,
+)
 from opcompass.engine.analyzer import Analyzer
 from opcompass.engine.result import _result_to_dict
 
 app = FastAPI(
     title="OpCompass API",
     description="SOL theoretical peak performance estimator for GPU operators",
-    version="0.1.0",
+    version=__version__,
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def api_request_validation_error(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """Return a stable code around FastAPI/Pydantic validation details."""
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": {
+                "code": "invalid_api_request",
+                "issues": exc.errors(),
+            }
+        },
+    )
+
+
+@app.exception_handler(Exception)
+async def api_internal_error(request: Request, exc: Exception) -> JSONResponse:
+    """Prevent uncaught failures from leaking implementation details."""
+    return JSONResponse(
+        status_code=500,
+        content={"detail": {
+            "code": "internal_error",
+            "message": "An unexpected internal error occurred.",
+        }},
+    )
 
 # ---------------------------------------------------------------------------
 # API Endpoints
@@ -43,10 +81,26 @@ def api_list_operators() -> List[Dict[str, Any]]:
     result: List[Dict[str, Any]] = []
     for name, cls in sorted(ops.items()):
         inst = cls()
+        spec = inst.spec
         result.append({
             "name": name,
             "description": inst.description,
             "param_dims": inst.param_dims,
+            "capabilities": inst.mode_capabilities(),
+            "parameter_spec": [
+                {
+                    "name": parameter.name,
+                    "aliases": list(parameter.aliases),
+                    "type": parameter.value_type.__name__,
+                    "required": parameter.required,
+                    "default": parameter.default,
+                    "minimum": parameter.minimum,
+                    "multiple_of": parameter.multiple_of,
+                    "kind": parameter.kind.value,
+                    "description": parameter.description,
+                }
+                for parameter in spec.parameters
+            ],
         })
     return result
 
@@ -73,6 +127,7 @@ def api_list_hardware() -> List[Dict[str, Any]]:
             "name": name,
             "vendor": inst.vendor,
             "description": inst.description,
+            "spec_version": inst.spec_version,
             "architecture": getattr(inst, "architecture", ""),
             "sm_version": getattr(inst, "sm_version", ""),
             "num_sms": inst.num_compute_units,
@@ -270,8 +325,18 @@ def api_tile_constraints(operator: str, hardware: str, dtype: str = "fp16") -> D
     return op_cls().get_tile_constraints(hw_cls(), resolved_dtype)
 
 
-@app.post("/api/analyze")
-def api_analyze(body: Dict[str, Any]) -> Dict[str, Any]:
+@app.post(
+    "/api/analyze",
+    response_model=AnalyzeResponse,
+    responses={
+        400: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+def api_analyze(body: AnalyzeRequest) -> Dict[str, Any]:
     """Run a SOL analysis.
 
     Expected body::
@@ -284,49 +349,47 @@ def api_analyze(body: Dict[str, Any]) -> Dict[str, Any]:
             "dims": {"M": 4096, "N": 4096, "K": 4096}
         }
     """
-    operator_name = body.get("operator")
-    hardware_name = body.get("hardware")
-    dtype_str = body.get("dtype", "fp16")
-    mode_str = body.get("mode", "hierarchy_roofline")
-    dims = body.get("dims", {})
-    pipeline_config_dict = body.get("pipeline_config", None)
+    # Keep direct Python callers useful while FastAPI itself supplies a model.
+    if isinstance(body, dict):
+        try:
+            body = AnalyzeRequest.model_validate(body)
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail={
+                "code": "invalid_api_request",
+                "issues": exc.errors(include_url=False),
+            })
 
-    if not operator_name:
-        raise HTTPException(status_code=400, detail="Missing 'operator'")
-    if not hardware_name:
-        raise HTTPException(status_code=400, detail="Missing 'hardware'")
+    operator_name = body.operator
+    hardware_name = body.hardware
+    dims = body.dims
 
     try:
         op_cls = get_operator(operator_name)
     except KeyError:
-        raise HTTPException(status_code=404, detail=f"Operator '{operator_name}' not found")
+        raise HTTPException(status_code=404, detail={
+            "code": "unknown_operator",
+            "operator": operator_name,
+            "message": f"Operator '{operator_name}' not found",
+        })
 
     try:
         hw_cls = get_hardware(hardware_name)
     except KeyError:
-        raise HTTPException(status_code=404, detail=f"Hardware '{hardware_name}' not found")
+        raise HTTPException(status_code=404, detail={
+            "code": "unknown_hardware",
+            "hardware": hardware_name,
+            "message": f"Hardware '{hardware_name}' not found",
+        })
 
-    try:
-        dtype = DataType(dtype_str.lower())
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"Unknown dtype '{dtype_str}'")
-
-    try:
-        mode = AnalysisMode(mode_str.lower())
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"Unknown mode '{mode_str}'")
+    dtype = body.dtype
+    mode = body.mode
 
     # Parse pipeline_config for pipeline mode
     pipeline_config = None
-    if pipeline_config_dict and mode == AnalysisMode.PIPELINE:
+    if body.pipeline_config and mode == AnalysisMode.PIPELINE:
+        pipeline_config_dict = body.pipeline_config
         pipeline_config = PipelineConfig(
-            async_copy_enabled=pipeline_config_dict.get("async_copy_enabled", True),
-            sparsity_2_4_enabled=pipeline_config_dict.get("sparsity_2_4_enabled", False),
-            block_m=pipeline_config_dict.get("block_m"),
-            block_n=pipeline_config_dict.get("block_n"),
-            block_k=pipeline_config_dict.get("block_k"),
-            stage_count=pipeline_config_dict.get("stage_count"),
-            warp_count=pipeline_config_dict.get("warp_count"),
+            **pipeline_config_dict.model_dump()
         )
 
     op = op_cls()
@@ -334,18 +397,70 @@ def api_analyze(body: Dict[str, Any]) -> Dict[str, Any]:
 
     analyzer = Analyzer()
     try:
-        result = analyzer.analyze(op, hw, dtype, mode=mode, pipeline_config=pipeline_config, **dims)
+        result = analyzer.analyze(
+            op, hw, dtype, mode=mode, pipeline_config=pipeline_config,
+            strict=body.strict, **dims
+        )
+    except OperatorValidationError as exc:
+        raise HTTPException(status_code=422, detail={
+            "code": exc.code,
+            "operator": exc.operator,
+            "issues": exc.issues,
+        })
+    except UnsupportedAnalysisError as exc:
+        raise HTTPException(status_code=422, detail={
+            "code": exc.code,
+            "operator": exc.operator,
+            "requested_mode": exc.mode.value,
+            "message": exc.message,
+        })
+    except NonFiniteResultError as exc:
+        raise HTTPException(status_code=500, detail={
+            "code": exc.code,
+            "field": exc.field_path,
+            "message": str(exc),
+        })
+    except BackendUnavailableError as exc:
+        raise HTTPException(status_code=503, detail={
+            "code": exc.code,
+            "backend": exc.backend,
+            "missing_dependencies": exc.missing_dependencies,
+            "message": str(exc),
+        })
+    except InfeasibleCandidateError as exc:
+        raise HTTPException(status_code=422, detail={
+            "code": exc.code,
+            "message": exc.message,
+        })
+    except UnsupportedDataTypeError as exc:
+        raise HTTPException(status_code=422, detail={
+            "code": exc.code,
+            "hardware": exc.hardware,
+            "dtype": exc.dtype.value,
+            "supported_dtypes": [item.value for item in exc.supported],
+            "message": str(exc),
+        })
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail={
+            "code": "invalid_analysis_request",
+            "message": str(exc),
+        })
 
-    return _result_to_dict(result)
+    return _result_to_dict(
+        result, include_trace=body.include_trace, trace_limit=body.trace_limit
+    )
 
 
 # ---------------------------------------------------------------------------
 # Static files (web UI)
 # ---------------------------------------------------------------------------
 
-WEB_DIR = os.path.join(os.path.dirname(__file__), "..", "web")
+_SOURCE_WEB_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "web"))
+_INSTALLED_WEB_DIR = os.path.join(sys.prefix, "opcompass", "web")
+WEB_DIR = next(
+    (path for path in (_SOURCE_WEB_DIR, _INSTALLED_WEB_DIR) if os.path.isdir(path)),
+    _SOURCE_WEB_DIR,
+)
 
 if os.path.isdir(WEB_DIR):
     app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")

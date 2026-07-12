@@ -16,6 +16,7 @@ from typing import Any
 
 import click
 
+from opcompass import __version__
 from opcompass.registry import discover_hardware, discover_operators, get_hardware, get_operator
 from opcompass.models import AnalysisMode, DataType, PipelineConfig
 from opcompass.engine.analyzer import Analyzer
@@ -104,7 +105,7 @@ def _build_pipeline_config(
 # ---------------------------------------------------------------------------
 
 @click.group()
-@click.version_option(version="0.1.0", prog_name="compass")
+@click.version_option(version=__version__, prog_name="compass")
 def main():
     """OpCompass — SOL theoretical peak performance estimator for GPU operators."""
 
@@ -175,7 +176,11 @@ def info_cmd(operator_name: str):
 @click.option("--hardware", "-H", required=True, help="Hardware target (e.g. a100)")
 @click.option("--dtype", "-d", default="fp16", help="Data type (default: fp16)")
 @click.option("--mode", "-m", default="hierarchy_roofline", help="Analysis mode: hierarchy_roofline, pipeline, solar")
-@click.option("--format", "-f", "fmt", default="table", help="Output format: table, json, csv")
+@click.option(
+    "--format", "-f", "fmt",
+    type=click.Choice(["table", "json", "csv"], case_sensitive=False),
+    default="table", show_default=True,
+)
 @click.option("--async-copy/--no-async-copy", default=True, help="Enable/disable async copy (pipeline mode)")
 @click.option("--sparsity/--no-sparsity", default=False, help="Enable/disable 2:4 sparsity (pipeline mode)")
 @click.option("--block-m", type=int, default=None, help="Override pipeline tile Block M")
@@ -183,6 +188,9 @@ def info_cmd(operator_name: str):
 @click.option("--block-k", type=int, default=None, help="Override pipeline tile Block K")
 @click.option("--stage-count", type=int, default=None, help="Override pipeline stage count")
 @click.option("--warp-count", type=int, default=None, help="Override pipeline warps per block")
+@click.option("--strict/--allow-fallback", default=False, help="Reject unsupported requested modes instead of falling back")
+@click.option("--trace/--no-trace", default=False, help="Include a bounded pipeline sub-operation trace in JSON")
+@click.option("--trace-limit", type=click.IntRange(1, 5000), default=1000, show_default=True)
 @click.argument("operator_name")
 @click.pass_context
 def analyze_cmd(
@@ -198,6 +206,9 @@ def analyze_cmd(
     block_k: int | None,
     stage_count: int | None,
     warp_count: int | None,
+    strict: bool,
+    trace: bool,
+    trace_limit: int,
     operator_name: str,
 ):
     """Analyze SOL performance for an operator.
@@ -247,13 +258,15 @@ def analyze_cmd(
     try:
         result = analyzer.analyze(
             op_inst, hw_inst, resolved_dtype, mode=resolved_mode,
-            pipeline_config=pipeline_config, **dims
+            pipeline_config=pipeline_config, strict=strict, **dims
         )
-    except ValueError as e:
+    except (ValueError, RuntimeError) as e:
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
 
-    click.echo(format_result(result, fmt=fmt))
+    click.echo(format_result(
+        result, fmt=fmt, include_trace=trace, trace_limit=trace_limit
+    ))
 
 
 # ---------------------------------------------------------------------------
@@ -264,7 +277,11 @@ def analyze_cmd(
 @click.option("--hardware", "-H", required=True, help="Hardware target(s), comma-separated (e.g. a100,h100)")
 @click.option("--dtype", "-d", default="fp16", help="Data type")
 @click.option("--mode", "-m", default="hierarchy_roofline", help="Analysis mode: hierarchy_roofline, pipeline, solar")
-@click.option("--format", "-f", "fmt", default="table", help="Output format: table, json, csv")
+@click.option(
+    "--format", "-f", "fmt",
+    type=click.Choice(["table", "json", "csv"], case_sensitive=False),
+    default="table", show_default=True,
+)
 @click.option("--async-copy/--no-async-copy", default=True, help="Enable/disable async copy (pipeline mode)")
 @click.option("--sparsity/--no-sparsity", default=False, help="Enable/disable 2:4 sparsity (pipeline mode)")
 @click.option("--block-m", type=int, default=None, help="Override pipeline tile Block M")
@@ -272,6 +289,9 @@ def analyze_cmd(
 @click.option("--block-k", type=int, default=None, help="Override pipeline tile Block K")
 @click.option("--stage-count", type=int, default=None, help="Override pipeline stage count")
 @click.option("--warp-count", type=int, default=None, help="Override pipeline warps per block")
+@click.option("--strict/--allow-fallback", default=False, help="Reject unsupported requested modes instead of falling back")
+@click.option("--trace/--no-trace", default=False, help="Include a bounded pipeline sub-operation trace in JSON")
+@click.option("--trace-limit", type=click.IntRange(1, 5000), default=1000, show_default=True)
 @click.argument("operator_name")
 @click.pass_context
 def sweep_cmd(
@@ -287,6 +307,9 @@ def sweep_cmd(
     block_k: int | None,
     stage_count: int | None,
     warp_count: int | None,
+    strict: bool,
+    trace: bool,
+    trace_limit: int,
     operator_name: str,
 ):
     """Sweep over multiple dimensions / hardware targets.
@@ -337,12 +360,14 @@ def sweep_cmd(
             try:
                 result = analyzer.analyze(
                     op_inst, hw_inst, resolved_dtype, mode=resolved_mode,
-                    pipeline_config=pipeline_config, **fixed_dims
+                    pipeline_config=pipeline_config, strict=strict, **fixed_dims
                 )
-            except ValueError as e:
+            except (ValueError, RuntimeError) as e:
                 click.echo(f"Error: {e}", err=True)
                 sys.exit(1)
-            click.echo(format_result(result, fmt=fmt))
+            click.echo(format_result(
+                result, fmt=fmt, include_trace=trace, trace_limit=trace_limit
+            ))
             click.echo()
         return
 
@@ -363,9 +388,9 @@ def sweep_cmd(
             try:
                 result = analyzer.analyze(
                     op_inst, hw_inst, resolved_dtype, mode=resolved_mode,
-                    pipeline_config=pipeline_config, **all_dims
+                    pipeline_config=pipeline_config, strict=strict, **all_dims
                 )
-            except ValueError as e:
+            except (ValueError, RuntimeError) as e:
                 click.echo(f"Error: {e}", err=True)
                 sys.exit(1)
             results.append(result)
@@ -374,7 +399,10 @@ def sweep_cmd(
     if fmt == "json":
         import json
         click.echo(json.dumps(
-            [_result_to_dict(r) for r in results], indent=2, ensure_ascii=False
+            [
+                _result_to_dict(r, include_trace=trace, trace_limit=trace_limit)
+                for r in results
+            ], indent=2, ensure_ascii=False
         ))
     elif fmt == "csv":
         click.echo("operator,hardware," + ",".join(axis_names) + "," + _csv_header())
@@ -397,9 +425,9 @@ def sweep_cmd(
 # Helpers for sweep output
 # ---------------------------------------------------------------------------
 
-def _result_to_dict(result) -> dict:
+def _result_to_dict(result, **kwargs) -> dict:
     from opcompass.engine.result import _result_to_dict
-    return _result_to_dict(result)
+    return _result_to_dict(result, **kwargs)
 
 
 def _csv_header() -> str:

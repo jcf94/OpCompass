@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from opcompass.models import (
+    OperatorParameterSpec,
+    OperatorSpec,
+    OperatorValidationError,
+)
 
 if TYPE_CHECKING:
     from opcompass.models import DataType, SubOp, TilingInfo
@@ -26,6 +32,108 @@ class Operator(ABC):
             {"M": "batch_rows", "N": "output_cols", "K": "inner_dim"}
         """
         return {}
+
+    @property
+    def spec(self) -> OperatorSpec:
+        """Machine-readable parameter contract.
+
+        Operators can override this to declare defaults, aliases, divisibility,
+        or implementation parameters. The compatibility ``param_dims`` mapping
+        remains the source for simple third-party operators.
+        """
+        return OperatorSpec(
+            name=self.name,
+            parameters=tuple(
+                OperatorParameterSpec(name=name, description=description)
+                for name, description in self.param_dims.items()
+            ),
+        )
+
+    def validate_dimensions(self, dimensions: dict[str, Any]) -> dict[str, Any]:
+        """Validate and canonicalize a concrete analysis request."""
+        specs = self.spec.parameters
+        by_name = {parameter.name: parameter for parameter in specs}
+        aliases = {
+            alias: parameter.name
+            for parameter in specs
+            for alias in parameter.aliases
+        }
+        canonical: dict[str, Any] = {}
+        issues: list[dict[str, str]] = []
+
+        for supplied_name, value in dimensions.items():
+            name = aliases.get(supplied_name, supplied_name)
+            if name not in by_name:
+                issues.append({
+                    "parameter": supplied_name,
+                    "reason": "unknown",
+                    "message": f"unknown parameter '{supplied_name}'",
+                })
+                continue
+            if name in canonical:
+                issues.append({
+                    "parameter": name,
+                    "reason": "duplicate",
+                    "message": f"parameter '{name}' was supplied more than once",
+                })
+                continue
+            canonical[name] = value
+
+        for parameter in specs:
+            if parameter.name not in canonical:
+                if parameter.required:
+                    issues.append({
+                        "parameter": parameter.name,
+                        "reason": "missing",
+                        "message": f"missing required parameter '{parameter.name}'",
+                    })
+                elif parameter.default is not None:
+                    canonical[parameter.name] = parameter.default
+                continue
+
+            value = canonical[parameter.name]
+            if parameter.value_type is int and (not isinstance(value, int) or isinstance(value, bool)):
+                issues.append({
+                    "parameter": parameter.name,
+                    "reason": "type",
+                    "message": f"parameter '{parameter.name}' must be an integer",
+                })
+                continue
+            if parameter.minimum is not None and value < parameter.minimum:
+                issues.append({
+                    "parameter": parameter.name,
+                    "reason": "minimum",
+                    "message": f"parameter '{parameter.name}' must be >= {parameter.minimum}",
+                })
+            if parameter.multiple_of and value % parameter.multiple_of != 0:
+                issues.append({
+                    "parameter": parameter.name,
+                    "reason": "multiple_of",
+                    "message": f"parameter '{parameter.name}' must be a multiple of {parameter.multiple_of}",
+                })
+
+        if issues:
+            raise OperatorValidationError(self.name, issues)
+        # Rebuild in declaration order so result shapes and future cache keys
+        # are independent of request-object ordering.
+        return {
+            parameter.name: canonical[parameter.name]
+            for parameter in specs
+            if parameter.name in canonical
+        }
+
+    def mode_capabilities(self) -> dict[str, str]:
+        """Return declared support, distinct from permissive fallback behavior."""
+        pipeline = (
+            type(self).get_ops_breakdown is not Operator.get_ops_breakdown
+            and type(self).get_tiling_strategy is not Operator.get_tiling_strategy
+        )
+        solar = type(self).get_solar_model_source is not Operator.get_solar_model_source
+        return {
+            "hierarchy_roofline": "formula",
+            "pipeline": "pipeline" if pipeline else "unsupported",
+            "solar": "formula" if solar else "unsupported",
+        }
 
     def compute_torch(self, inputs: list["torch.Tensor"], **kwargs) -> list["torch.Tensor"]:
         """Compute the operator using PyTorch (optional).

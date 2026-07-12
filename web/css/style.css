@@ -424,6 +424,70 @@ select:focus, input:focus {
 #bottleneck-card.memory_read .metric-value,
 #bottleneck-card.memory_write .metric-value { color: var(--bottleneck); }
 
+/* Model provenance plate: mirrors the requested → executed route. */
+.model-contract {
+  display: grid;
+  grid-template-columns: 1.35fr repeat(4, minmax(0, 1fr));
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--compute);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+.model-contract.is-fallback { border-left-color: #d97706; }
+.model-route, .contract-field {
+  min-width: 0;
+  padding: var(--space) var(--space-lg);
+  border-right: 1px solid var(--border-light);
+}
+.contract-field:last-of-type { border-right: 0; }
+.contract-kicker, .contract-field > span {
+  display: block;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: var(--space-xs);
+}
+.model-route strong, .contract-field strong {
+  display: block;
+  color: var(--text-emphasis);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+.contract-field small {
+  display: block;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  line-height: 1.35;
+  margin-top: var(--space-xs);
+  overflow-wrap: anywhere;
+}
+.contract-status {
+  display: inline-block;
+  margin-top: var(--space-sm);
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  background: #e8f0ff;
+  color: #315a9b;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+}
+.is-fallback .contract-status { background: #fff3d6; color: #9a5a00; }
+.contract-message {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: var(--space-sm) var(--space-lg);
+  border-top: 1px solid var(--border-light);
+  background: var(--surface-inset);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+.is-fallback .contract-message { color: #7c4a03; background: #fffaf0; }
+
 /* ── Chart Row ──────────────────────────────────────────────────── */
 .card-row {
   display: flex;
@@ -1153,6 +1217,9 @@ footer {
    ═══════════════════════════════════════════════════════════════════ */
 
 @media (max-width: 1000px) {
+  .model-contract { grid-template-columns: 1fr 1fr; }
+  .model-route { grid-column: 1 / -1; }
+  .contract-field { border-top: 1px solid var(--border-light); }
   main { flex-direction: column; }
 
   #config-panel,
@@ -1181,6 +1248,9 @@ footer {
 }
 
 @media (max-width: 640px) {
+  .model-contract { grid-template-columns: 1fr; }
+  .model-route { grid-column: auto; }
+  .model-route, .contract-field { border-right: 0; }
   header {
     padding: var(--space);
     gap: var(--space);

@@ -80,3 +80,95 @@ def test_cli_analyze_accepts_pipeline_stage_and_warp_overrides():
     assert '"stage_count": 3' in result.output
     assert '"warp_count": 8' in result.output
     assert '"pipeline_candidates"' in result.output
+
+
+def test_cli_analyze_rejects_missing_required_dimension():
+    result = CliRunner().invoke(
+        main,
+        ["analyze", "--hardware", "a100", "matmul", "--M", "128", "--N", "128"],
+    )
+
+    assert result.exit_code == 1
+    assert "missing required parameter 'K'" in result.output
+
+
+def test_cli_analyze_rejects_unknown_dimension():
+    result = CliRunner().invoke(
+        main,
+        [
+            "analyze", "--hardware", "a100", "matmul",
+            "--M", "128", "--N", "128", "--K", "128", "--batch", "2",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "unknown parameter 'batch'" in result.output
+
+
+def test_cli_pipeline_fallback_is_explicit_in_json():
+    result = CliRunner().invoke(
+        main,
+        [
+            "analyze", "--hardware", "a100", "--mode", "pipeline",
+            "--format", "json", "reduction", "--N", "4096", "--D", "256",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert '"requested_mode": "pipeline"' in result.output
+    assert '"executed_mode": "hierarchy_roofline"' in result.output
+    assert '"reason_code": "pipeline_model_unavailable"' in result.output
+
+
+def test_cli_strict_pipeline_rejects_fallback():
+    result = CliRunner().invoke(
+        main,
+        [
+            "analyze", "--hardware", "a100", "--mode", "pipeline", "--strict",
+            "reduction", "--N", "4096", "--D", "256",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "has no pipeline model" in result.output
+
+
+def test_cli_trace_is_opt_in_and_bounded():
+    args = [
+        "analyze", "--hardware", "a100", "--mode", "pipeline",
+        "--format", "json", "matmul", "--M", "256", "--N", "256", "--K", "256",
+    ]
+    compact = CliRunner().invoke(main, args)
+    traced = CliRunner().invoke(main, args[:7] + ["--trace", "--trace-limit", "2"] + args[7:])
+
+    assert compact.exit_code == 0
+    assert '"sub_ops"' not in compact.output
+    assert traced.exit_code == 0
+    assert traced.output.count('"pipeline_stage"') == 2
+
+
+def test_cli_rejects_unknown_output_format():
+    result = CliRunner().invoke(
+        main,
+        [
+            "analyze", "--hardware", "a100", "--format", "yaml",
+            "matmul", "--M", "128", "--N", "128", "--K", "128",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "Invalid value for '--format'" in result.output
+
+
+def test_cli_reports_unsupported_dtype_without_non_finite_output():
+    result = CliRunner().invoke(
+        main,
+        [
+            "analyze", "--hardware", "a100", "--dtype", "fp8",
+            "matmul", "--M", "128", "--N", "128", "--K", "128",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "does not support dtype 'fp8'" in result.output
+    assert "inf" not in result.output.lower()

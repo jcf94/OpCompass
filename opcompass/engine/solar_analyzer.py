@@ -56,12 +56,8 @@ def _check_solar_dependencies():
         missing.append("torchview")
 
     if missing:
-        raise ImportError(
-            f"Solar analysis mode requires additional dependencies: {', '.join(missing)}. "
-            f"Install them with:\n"
-            f"  pip install {' '.join(missing)}\n"
-            f"Or follow SOLAR's install guide: 3rdparty/SOLAR/install.sh"
-        )
+        from opcompass.models import BackendUnavailableError
+        raise BackendUnavailableError("solar", missing)
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +123,10 @@ class SolarAnalyzer:
         Returns:
             AnalysisResult with solar_data populated.
         """
-        from opcompass.models import AnalysisMode, AnalysisResult, SolarAnalysisData
+        from opcompass.models import (
+            AnalysisMode, AnalysisResult, EstimateKind, EvidenceInfo, SolarAnalysisData,
+            SupportLevel,
+        )
 
         # Check dependencies before attempting SOLAR import
         _check_solar_dependencies()
@@ -218,6 +217,17 @@ class SolarAnalyzer:
             shapes=dims,
             dtype=dtype,
             mode=AnalysisMode.SOLAR,
+            requested_mode=AnalysisMode.SOLAR,
+            executed_mode=AnalysisMode.SOLAR,
+            estimate_kind=EstimateKind.ANALYTICAL_MODEL,
+            support_level=SupportLevel.FORMULA,
+            model_id="solar_v1",
+            evidence=EvidenceInfo(
+                "analytical_model", ("solar_graph_model", "hardware_theoretical_peaks")
+            ),
+            compute_unit_clock_hz=freq_hz,
+            assumptions=["SOLAR fused-prefetched execution is used as the point estimate."],
+            missing_effects=["Measured kernel calibration"],
             total_flops=total_flops,
             total_read_bytes=read_bytes,
             total_write_bytes=write_bytes,
