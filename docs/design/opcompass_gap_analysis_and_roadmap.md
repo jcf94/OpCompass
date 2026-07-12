@@ -794,6 +794,64 @@ Exit criteria:
   both families.
 - Multi-pass memory traffic and synchronization are visible in explanations.
 
+### V0.6.1 — Web integration for V0.3–V0.6
+
+Status (2026-07-12): next implementation milestone. Backend contracts exist,
+but the browser currently renders mainly the legacy pipeline schedule and the
+V0.2 model contract. The Web UI does not yet consume the explicit IR schedule,
+legacy comparison, typed memory/synchronization resources, hardware provenance,
+measurement/accuracy data, or reduction/normalization implementation choices.
+
+Goal: make the modeling and evidence added in V0.3–V0.6 inspectable and honest
+in the browser before adding more operator families.
+
+Work packages:
+
+1. Replace the numeric-only `param_dims` form builder with the typed
+   `parameter_spec` contract. Render integer inputs and constrained selectors,
+   distinguish shape from implementation parameters, and expose Reduction
+   strategy plus LayerNorm/RMSNorm variant and algorithm choices.
+2. Add an explicit-IR schedule panel showing total cycles, loop iterations,
+   resource busy cycles, wave count, underfill, tail utilization, launch
+   overhead, and bounded trace windows. Keep the compatibility timeline clearly
+   labeled as legacy and display the new/legacy comparison ratio and status.
+3. Add a resource-path view for HBM, L2, copy/TMA, shared memory, RF/TMEM,
+   compute, synchronization, and store. Render architecture-specific cp.async,
+   mbarrier, WGMMA, UMMA/TMEM, barrier, rsqrt, partial-write, and reload nodes
+   from API data rather than inferring semantics from stage-name substrings.
+4. Add hardware provenance panels to the hardware detail and overview pages:
+   spec version, audit status, field value/unit, source title/link, source kind,
+   verification date, and published/assumption/calibrated/provisional status.
+5. Add measurement and validation API routes plus a Web validation page for raw
+   records, runtime distributions, environment/kernel identity, median APE,
+   p90 APE, log-RMSE, bias, top-k recall, grouped slices, and transparent
+   calibration overlays. Never visually merge measured, raw modeled, and
+   calibrated values.
+6. Add responsive empty/loading/error states, accessible tables and legends,
+   and explicit wording for experimental/unquantified models.
+7. Add pure presentation-contract tests, API/Web contract tests, and browser
+   smoke tests covering Matmul, Reduction, LayerNorm, RMSNorm, A100, H100, and
+   B200 at desktop and narrow viewport widths.
+
+Exit criteria:
+
+- Every new top-level API field introduced in V0.3–V0.6 is either rendered or
+  explicitly documented as non-visual internal data; unused fields fail a Web
+  contract coverage test.
+- A user can select Reduction and normalization variants without editing JSON,
+  and the canonical request displayed by the UI matches the submitted request.
+- The IR view explains resource bottlenecks, dependencies, synchronization,
+  underfill, tail behavior, and multi-pass traffic without relying on node-name
+  classification in JavaScript.
+- Hardware pages visibly distinguish sourced facts from model assumptions and
+  provide working primary-source links.
+- Validation pages show raw metrics before calibration and preserve model,
+  hardware, dataset, kernel, and raw-source identity.
+- Browser smoke tests prove successful analysis and rendering for V0.3–V0.6;
+  fallback, unsupported, empty-data, and malformed-response states are covered.
+- V0.7 does not start until this milestone passes first-party tests and visual
+  verification.
+
 ### V0.7 — Convolution and richer matmul families
 
 Goal: cover important tensor-core workloads without pretending all are plain
@@ -894,6 +952,7 @@ learned output outside its support rather than extrapolating silently.
 - CSV/table serialization fixes.
 - First-party pytest configuration and separated SOLAR suite.
 - Correct misleading scheduler and hierarchy claims in documentation.
+- Close the V0.3–V0.6 API/Web presentation gap before expanding operator scope.
 
 ### P1 — modeling foundation
 
@@ -929,45 +988,47 @@ learned output outside its support rather than extrapolating silently.
 
 Do not combine these into one rewrite.
 
-### PR 1 — Test boundary and reproduced regressions
+### PR 1 — Typed workload controls and request preview
 
-- Set first-party pytest paths and markers.
-- Add tests that currently fail for missing/zero/negative dimensions, unknown
-  dimensions, silent pipeline fallback, JSON infinity, and phase timing.
-- Add baseline API tests using FastAPI's test client.
-- Record first-party coverage separately from vendored coverage.
+- Drive inputs from `parameter_spec`, including implementation selectors.
+- Add Reduction and LayerNorm/RMSNorm variant controls.
+- Show the canonical request and capability/support state before execution.
+- Add form-contract and invalid-input tests.
 
-### PR 2 — Workload validation and capability contract
+### PR 2 — Explicit IR and resource visualization
 
-- Add operator parameter definitions and a canonical workload validator.
-- Expose per-operator support by mode and hardware capability.
-- Add strict/permissive fallback policy.
-- Migrate all six operators without changing valid formula results.
+- Add compact IR summary, resource utilization, dependency/trace window, and
+  launch/tail/underfill views.
+- Label the existing timeline as the compatibility schedule.
+- Add legacy/new comparison rendering and resource-path legends.
+- Add Matmul/Reduction/normalization presentation fixtures.
 
-### PR 3 — Result V1 and output hygiene
+### PR 3 — Hardware provenance UI
 
-- Add result identity, executed mode, estimate kind, diagnostics, and units.
-- Add compact schedule summary and opt-in/capped trace.
-- Fix JSON, CSV, and table formatting.
-- Add serialization golden tests and compatibility mapping for old fields.
+- Render audit status and per-field provenance on detail pages.
+- Add provenance summaries and filters to the overview.
+- Distinguish published, assumption, calibrated, and provisional values.
+- Test links, missing provenance, and legacy targets.
 
-### PR 4 — Typed API and UI honesty
+### PR 4 — Measurement and accuracy workflow
 
-- Add Pydantic request/response/error models and OpenAPI examples.
-- Update UI to show support level, fallback, warnings, and estimate kind.
-- Hide pipeline visualization when no pipeline executed.
-- Add a minimal browser smoke test.
+- Add read-only measurement/report API routes with pagination and stable error
+  contracts.
+- Add validation tables/charts, grouped metrics, raw-source identity, and
+  calibration comparison.
+- Keep raw modeled, measured, and calibrated series visually distinct.
+- Add empty-dataset and unquantified-accuracy behavior.
 
-### PR 5 — Packaging and documentation baseline
+### PR 5 — Browser verification and responsive polish
 
-- Consolidate metadata and package runtime assets.
-- Add wheel/sdist clean-install smoke tests.
-- Add CI for supported Python versions, unit/contract tests, coverage, lint, and
-  type checks.
-- Update README and `pipeline_simulator_design.md` to match implementation.
+- Add browser smoke coverage for Matmul, Reduction, LayerNorm, RMSNorm and the
+  A100/H100/B200 hardware pages.
+- Verify loading, fallback, unsupported, error, trace-limit, and narrow-screen
+  states.
+- Capture stable screenshots for review and update Web documentation.
 
-Sprint completion means the current model has become harder to misuse. It does
-not require the new scheduler yet.
+Sprint completion means all user-relevant V0.3–V0.6 semantics are visible and
+testable in the Web UI. Convolution and richer matmul work starts afterward.
 
 ## 10. Measurement and acceptance framework
 
