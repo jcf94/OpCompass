@@ -703,6 +703,11 @@ Exit criteria:
 
 ### V0.4 — Memory paths, synchronization, and modern GPU semantics
 
+Implementation status (2026-07-12): typed memory paths and transactions,
+first-order reuse policies, explicit Ampere/Hopper/Blackwell synchronization
+graphs, and launch wave/underfill/tail policies are implemented. See
+[`../releases/v0.4.md`](../releases/v0.4.md) for scope and limitations.
+
 Goal: make resource bottlenecks and architecture differences explanatory.
 
 Work packages:

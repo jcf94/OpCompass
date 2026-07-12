@@ -8,6 +8,7 @@ those declarations.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 import heapq
 from typing import Iterable
 
@@ -22,11 +23,36 @@ class PipelineIRValidationError(ValueError):
         super().__init__("; ".join(self.issues))
 
 
+class ResourceKind(str, Enum):
+    HBM = "hbm"
+    L2 = "l2"
+    COPY = "copy"
+    SHARED = "shared"
+    REGISTER = "register"
+    TMEM = "tmem"
+    COMPUTE = "compute"
+    SYNCHRONIZATION = "synchronization"
+    STORE = "store"
+    GENERIC = "generic"
+
+
+class SyncPrimitive(str, Enum):
+    SYNCTHREADS = "syncthreads"
+    CP_ASYNC_COMMIT = "cp_async_commit"
+    CP_ASYNC_WAIT = "cp_async_wait"
+    MBARRIER = "mbarrier"
+    WGMMA_COMMIT = "wgmma_commit"
+    WGMMA_WAIT = "wgmma_wait"
+    UMMA_COMMIT = "umma_commit"
+    UMMA_WAIT = "umma_wait"
+
+
 @dataclass(frozen=True)
 class Resource:
     name: str
     capacity: int = 1
     queue_capacity: int | None = None
+    kind: ResourceKind = ResourceKind.GENERIC
 
 
 @dataclass(frozen=True)
@@ -56,12 +82,23 @@ class BufferAccess:
 
 
 @dataclass(frozen=True)
+class MemoryAccess:
+    path: tuple[ResourceKind, ...]
+    bytes: int
+    transaction_bytes: int
+    transactions: int
+    reuse_policy: str = "none"
+
+
+@dataclass(frozen=True)
 class Node:
     name: str
     duration_cycles: int
     work: Work
     demands: tuple[ResourceDemand, ...]
     accesses: tuple[BufferAccess, ...] = ()
+    memory_access: MemoryAccess | None = None
+    synchronization: SyncPrimitive | None = None
 
 
 @dataclass(frozen=True)
@@ -82,6 +119,9 @@ class Loop:
 class Launch:
     grid_size: int = 1
     resident_blocks: int = 1
+    compute_units: int = 1
+    launch_overhead_cycles: int = 0
+    tail_fraction: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -109,6 +149,10 @@ class CompactSchedule:
     total_cycles: int
     resource_busy_cycles: dict[str, int]
     loop_iterations: int
+    wave_count: int = 1
+    underfilled: bool = False
+    tail_fraction: float = 1.0
+    launch_overhead_cycles: int = 0
 
     def trace_window(self, start_cycle: int, end_cycle: int) -> tuple[ScheduledNode, ...]:
         """Reconstruct the entries intersecting a half-open cycle window."""
@@ -137,8 +181,13 @@ def validate_program(program: PipelineProgram) -> None:
         issues.append("loop iterations must be positive")
     if program.loop.initiation_interval < 0:
         issues.append("loop initiation interval cannot be negative")
-    if program.launch.grid_size < 1 or program.launch.resident_blocks < 1:
+    if (program.launch.grid_size < 1 or program.launch.resident_blocks < 1
+            or program.launch.compute_units < 1):
         issues.append("launch values must be positive")
+    if program.launch.launch_overhead_cycles < 0:
+        issues.append("launch overhead cannot be negative")
+    if not 0 < program.launch.tail_fraction <= 1:
+        issues.append("launch tail fraction must be in (0, 1]")
 
     valid_units = {"bytes", "flops", "fma", "operations", "cycles"}
     for resource in program.resources:
@@ -170,6 +219,14 @@ def validate_program(program: PipelineProgram) -> None:
                 issues.append(f"node '{node.name}' has invalid buffer access mode '{access.mode}'")
             elif abs(access.slot_offset) >= buffer.slots:
                 issues.append(f"node '{node.name}' buffer slot offset exceeds ring size")
+        access = node.memory_access
+        if access is not None:
+            if not access.path or access.bytes < 0 or access.transaction_bytes < 1:
+                issues.append(f"node '{node.name}' has an invalid memory access")
+            elif access.transactions * access.transaction_bytes < access.bytes:
+                issues.append(f"node '{node.name}' memory transactions do not cover its bytes")
+            if access.reuse_policy not in {"none", "cta_order", "resident", "streaming"}:
+                issues.append(f"node '{node.name}' has an invalid reuse policy")
 
     for edge in program.edges:
         if edge.source not in node_map or edge.target not in node_map:
@@ -277,9 +334,16 @@ def schedule(program: PipelineProgram) -> CompactSchedule:
         name: sum((right - left) * units for left, right, units in calendar)
         for name, calendar in calendars.items()
     }
+    slots = program.launch.compute_units * program.launch.resident_blocks
+    waves = (program.launch.grid_size + slots - 1) // slots
     return CompactSchedule(
         entries=tuple(entries),
-        total_cycles=max((entry.end_cycle for entry in entries), default=0),
+        total_cycles=max((entry.end_cycle for entry in entries), default=0) * waves
+        + program.launch.launch_overhead_cycles,
         resource_busy_cycles=busy,
         loop_iterations=program.loop.iterations,
+        wave_count=waves,
+        underfilled=program.launch.grid_size < slots,
+        tail_fraction=program.launch.tail_fraction,
+        launch_overhead_cycles=program.launch.launch_overhead_cycles,
     )

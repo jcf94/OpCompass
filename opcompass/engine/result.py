@@ -136,6 +136,10 @@ def _result_to_dict(
             "total_cycles": ir.total_cycles,
             "loop_iterations": ir.loop_iterations,
             "resource_busy_cycles": ir.resource_busy_cycles,
+            "wave_count": ir.wave_count,
+            "underfilled": ir.underfilled,
+            "tail_fraction": ir.tail_fraction,
+            "launch_overhead_cycles": ir.launch_overhead_cycles,
             "trace": {
                 "included": False,
                 "total_nodes": len(ir.entries),

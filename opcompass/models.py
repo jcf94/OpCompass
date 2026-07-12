@@ -417,7 +417,7 @@ class AnalysisResult:
     estimate_kind: EstimateKind = EstimateKind.THEORETICAL_BOUND
     support_level: SupportLevel = SupportLevel.FORMULA
     fallback: FallbackInfo | None = None
-    schema_version: str = "0.3.0"
+    schema_version: str = "0.4.0"
     model_id: str = "hierarchy_roofline_v1"
     implementation_version: str = "unknown"
     implementation_revision: str = "unknown"
