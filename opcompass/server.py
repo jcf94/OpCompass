@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
-from opcompass.api_models import AnalyzeRequest, AnalyzeResponse
+from opcompass.api_models import AnalyzeRequest, AnalyzeResponse, ErrorResponse
 from opcompass import __version__
 
 from opcompass.registry import (
@@ -55,6 +55,18 @@ async def api_request_validation_error(
                 "issues": exc.errors(),
             }
         },
+    )
+
+
+@app.exception_handler(Exception)
+async def api_internal_error(request: Request, exc: Exception) -> JSONResponse:
+    """Prevent uncaught failures from leaking implementation details."""
+    return JSONResponse(
+        status_code=500,
+        content={"detail": {
+            "code": "internal_error",
+            "message": "An unexpected internal error occurred.",
+        }},
     )
 
 # ---------------------------------------------------------------------------
@@ -313,7 +325,17 @@ def api_tile_constraints(operator: str, hardware: str, dtype: str = "fp16") -> D
     return op_cls().get_tile_constraints(hw_cls(), resolved_dtype)
 
 
-@app.post("/api/analyze", response_model=AnalyzeResponse)
+@app.post(
+    "/api/analyze",
+    response_model=AnalyzeResponse,
+    responses={
+        400: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
 def api_analyze(body: AnalyzeRequest) -> Dict[str, Any]:
     """Run a SOL analysis.
 
@@ -344,12 +366,20 @@ def api_analyze(body: AnalyzeRequest) -> Dict[str, Any]:
     try:
         op_cls = get_operator(operator_name)
     except KeyError:
-        raise HTTPException(status_code=404, detail=f"Operator '{operator_name}' not found")
+        raise HTTPException(status_code=404, detail={
+            "code": "unknown_operator",
+            "operator": operator_name,
+            "message": f"Operator '{operator_name}' not found",
+        })
 
     try:
         hw_cls = get_hardware(hardware_name)
     except KeyError:
-        raise HTTPException(status_code=404, detail=f"Hardware '{hardware_name}' not found")
+        raise HTTPException(status_code=404, detail={
+            "code": "unknown_hardware",
+            "hardware": hardware_name,
+            "message": f"Hardware '{hardware_name}' not found",
+        })
 
     dtype = body.dtype
     mode = body.mode
@@ -411,7 +441,10 @@ def api_analyze(body: AnalyzeRequest) -> Dict[str, Any]:
             "message": str(exc),
         })
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail={
+            "code": "invalid_analysis_request",
+            "message": str(exc),
+        })
 
     return _result_to_dict(
         result, include_trace=body.include_trace, trace_limit=body.trace_limit

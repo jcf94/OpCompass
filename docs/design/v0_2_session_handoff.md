@@ -1,12 +1,12 @@
 # OpCompass v0.2 Session Handoff
 
-Status: implementation in progress
+Status: implementation complete; release-candidate packaging pending
 
 Branch: `dev/v0.2`
 
 Package version: `0.2.0.dev0`
 
-Last updated: 2026-07-11
+Last updated: 2026-07-12
 
 This document is the continuation point for the next development session. The
 source plan remains
@@ -34,6 +34,12 @@ The main v0.2 trust contract is operational:
 - Wheel and sdist builds include the Web UI and SOLAR architecture YAML files.
 - The Web UI exposes requested-to-executed routing, fallback, model identity,
   evidence, and uncertainty instead of relying on the legacy `mode` field.
+- The analyze HTTP response is a closed nested Pydantic contract, including
+  mode-specific pipeline and SOLAR sections and a documented error envelope.
+- Real ASGI requests cover success, fallback, strict rejection, domain errors,
+  trace limits, optional-backend failures, and uncaught internal failures.
+- `scripts/package_smoke.py` builds wheel and sdist, verifies a clean wheel
+  install, and rebuilds a wheel from the produced sdist.
 
 The current pipeline implementation is still `legacy_matmul_v1`: a
 cycle-based analytical Matmul schedule, not a generic dependency-driven or
@@ -62,7 +68,7 @@ The latest complete run passed:
 
 ```text
 pytest -q
-147 passed in 9.93s
+160 passed in 12.39s
 
 node --check web/js/result_contract.js
 node --check web/js/app.js
@@ -83,7 +89,7 @@ pytest -m solar -q
 pytest -q
 ```
 
-Packaging was also checked manually:
+Packaging was also checked with `python scripts/package_smoke.py`:
 
 - built `opcompass-0.2.0.dev0-py3-none-any.whl`;
 - built `opcompass-0.2.0.dev0.tar.gz`;
@@ -94,117 +100,64 @@ Packaging was also checked manually:
 
 ## 4. Remaining v0.2 work
 
-### P0 — required before release candidate
+### P0 — release-candidate audit
 
-#### 4.1 Complete the HTTP API contract
+#### 4.1 Complete the HTTP API contract — completed 2026-07-12
 
-`AnalyzeRequest` is strict, but `AnalyzeResponse` still leaves mode-specific
-sections partially open through `Dict[str, Any]` and allowed extra fields.
-Other routes also return unversioned `Dict` payloads.
+`AnalyzeResponse` now uses closed nested response models for all serialized
+analysis sections. `/api/analyze` documents a common structured error envelope
+and returns stable codes for unknown operators, unknown hardware, and internal
+failures. v0.2 retains `/api/*`; route versioning is deferred until a written
+compatibility/migration policy requires a new namespace. Other metadata routes
+remain unversioned dictionaries and should be addressed with that policy.
 
-Next actions:
+#### 4.2 Add real HTTP integration tests — completed 2026-07-12
 
-1. Define nested Pydantic response models for fallback, evidence, uncertainty,
-   roofline, compact schedule, trace metadata, tiling, candidates, pipeline
-   memory, and SOLAR data.
-2. Add structured error response models and document them in OpenAPI.
-3. Give unknown operator, unknown hardware, and uncaught internal failures
-   stable error codes; do not return a mixture of typed objects and plain
-   strings.
-4. Decide whether v0.2 retains `/api/*` or introduces `/api/v1/*`; avoid
-   duplicating routes unless a compatibility policy is written down.
+`httpx` is now a dev dependency. FastAPI `TestClient` verifies actual JSON and
+content types for success, Pydantic rejection, fallback, strict rejection,
+unsupported dtype, unavailable SOLAR, infeasible candidates, trace limiting,
+unknown resources, and internal failures. The tests exposed and fixed a real
+fallback response-validation mismatch for empty roofline detail.
 
-#### 4.2 Add real HTTP integration tests
+#### 4.3 Automate clean package smoke tests — completed 2026-07-12
 
-Current API tests call route functions directly and inspect `app.openapi()`.
-They do not execute ASGI HTTP requests because `httpx` is not in the dev
-dependencies.
+`scripts/package_smoke.py` now builds wheel and sdist, installs the wheel into
+a clean venv, exercises the CLI and representative JSON analysis, generates
+OpenAPI, checks Web/SOLAR resources, and rebuilds from the sdist. It passed
+locally on Python 3.8. Wiring it into CI remains part of 4.4.
 
-Next actions:
+#### 4.4 Add CI and supported-Python gates — explicitly omitted
 
-1. Add a compatible `httpx` version to the `dev` extra.
-2. Use FastAPI `TestClient` to cover successful analysis, Pydantic rejection,
-   fallback, strict unsupported mode, unsupported dtype, unavailable optional
-   backend, infeasible candidate, trace limiting, and response validation.
-3. Verify content types and the exact serialized error envelope.
+The project intentionally does not add GitHub Actions or a Python-version
+matrix for v0.2. The release baseline is local Python 3.8 verification plus the
+clean-install package smoke script. Packaging continues to declare `>=3.8`;
+this is a source-compatibility claim, not a CI-verified version matrix.
 
-#### 4.3 Automate clean package smoke tests
+#### 4.5 Write release documentation — completed 2026-07-12
 
-Resource packaging was manually verified and source-tree tests check resource
-paths, but pytest/CI does not build and install artifacts in a clean
-environment.
-
-Next actions:
-
-1. Add the `build` package to development/release tooling.
-2. Build wheel and sdist in a temporary output directory.
-3. Install the wheel into a clean venv and run:
-   - `compass --version`;
-   - `compass list operators`;
-   - `compass list hardware`;
-   - representative JSON analysis;
-   - API import/OpenAPI generation;
-   - Web and SOLAR YAML resource checks.
-4. Repeat a build from the produced sdist.
-
-#### 4.4 Add CI and supported-Python gates
-
-The project currently has no checked-in CI. v0.2 has been verified locally on
-Python 3.8, but the declared support range is `>=3.8`.
-
-Next actions:
-
-1. Add a first-party GitHub Actions matrix for supported Python versions.
-2. Run `pytest -m "not solar"` as the base gate.
-3. Run SOLAR integration separately so optional dependencies and vendored
-   tests do not destabilize the base job.
-4. Add a package build/clean-install job.
-5. Choose and document the upper Python version actually supported by the
-   dependency set; do not leave an unbounded claim without CI evidence.
-
-#### 4.5 Write release documentation
-
-Next actions:
-
-1. Add a changelog or v0.2 release note summarizing contract changes and
-   compatibility impact.
-2. Document the semantic schema version and compatibility policy.
-3. Publish a concise known-limitations page covering:
-   - `hierarchy_roofline` is currently an HBM/peak bound, not a true hierarchy
-     model;
-   - detailed pipeline support is Matmul-only;
-   - uncertainty is explicitly unquantified;
-   - hardware facts are still `legacy-v1` without per-field provenance;
-   - the scheduler builds the full internal sub-op list even though default
-     serialization is compact.
-4. Change `0.2.0.dev0` to an RC only after the release gates pass.
+Release notes, semantic schema compatibility policy, and known limitations are
+published under `docs/releases/` and `docs/reference/`. The package remains
+`0.2.0.dev0` until an explicit release packaging/versioning step is requested.
 
 ### P1 — finish or explicitly defer
 
-#### 4.6 Make operator specs uniformly explicit
+#### 4.6 Make operator specs uniformly explicit — completed 2026-07-12
 
-Central validation is complete, but most operators still derive a basic spec
-from legacy `param_dims`. Only selected operators declare defaults or
-cross-field constraints explicitly.
+All six built-in operators now override `spec` explicitly. Tests enforce typed,
+positive parameter declarations and canonical declaration order. Richer
+layout, transpose, mixed-dtype, convolution, attention, and algorithm semantics
+are documented as deferred rather than implied by the current formulas.
 
-For v0.2, either:
-
-- convert every current operator to an explicit `OperatorSpec`, including
-  parameter kinds and meaningful constraints; or
-- document that richer layout, transpose, mixed-dtype, stride, padding,
-  dilation, groups, causal, and algorithm semantics are deferred to the
-  operator-specific releases in the roadmap.
-
-Do not expand v0.2 into implementing all those later operator semantics.
-
-#### 4.7 Normalize diagnostics
+#### 4.7 Normalize diagnostics — explicitly deferred to v0.3
 
 Assumptions, warnings, missing effects, fallback, candidate rejection, and
 errors exist, but they do not yet share one diagnostic schema.
 
-A small v0.2-compatible improvement would define code/severity/message/context
-for diagnostics while retaining the existing convenience lists. A larger
-diagnostic rewrite should be deferred.
+Adding a new unified diagnostic collection after freezing schema `0.2.0` would
+be a contract change. v0.2 retains structured fallback, errors, and candidate
+rejections alongside the existing convenience lists. The known-limitations
+page explicitly records the unified code/severity/message/context schema as a
+v0.3 task.
 
 ### Explicitly deferred to v0.3+
 
@@ -226,25 +179,23 @@ The following are known gaps but are not v0.2 release blockers:
 | Pipeline fallback is explicit; strict never falls back | Met | Web UI now displays executed mode and fallback |
 | Successful numeric result fields are finite | Met | Recursive Analyzer finalization check plus strict JSON |
 | Default JSON size is independent of K trace length | Met for serialization | Internal sub-op generation still scales with K; defer to v0.3 |
-| API/OpenAPI, CLI, serialization tests pass on supported Python | Partial | Local Python 3.8 passes; HTTP TestClient and version matrix remain |
+| API/OpenAPI, CLI, serialization tests pass on release baseline | Met | 160 tests pass locally on Python 3.8; HTTP TestClient included; CI matrix omitted by decision |
 | First-party and vendored/SOLAR counts are separate | Met | `solar` marker and `testpaths = ["tests"]` |
 
 ## 6. Recommended first task next session
 
-Start with real HTTP contract testing because it will expose any mismatch
-between Pydantic models, FastAPI exception handling, and actual JSON responses
-before CI freezes the interface.
+Perform the explicit release packaging step when desired: choose the RC version,
+update package/release-note version references together, rerun the full suite
+and `scripts/package_smoke.py`, and tag the resulting revision. No v0.2 feature
+implementation remains.
 
 Suggested sequence:
 
 ```text
-1. Add httpx to the dev extra.
-2. Add TestClient success/error tests.
-3. Replace AnalyzeResponse Any/dict sections with nested models.
-4. Add structured error response models to OpenAPI.
-5. Run the complete suite.
-6. Commit the API contract as one focused change.
-7. Add package smoke CI and the Python matrix next.
+1. Select the RC version (for example `0.2.0rc1`).
+2. Update package and release-note version references.
+3. Run `pytest -q` and `python scripts/package_smoke.py`.
+4. Commit and tag the release candidate.
 ```
 
 Useful starting files:
@@ -260,6 +211,6 @@ Useful starting files:
 ## 7. Session caveat
 
 The Web result-contract behavior has Node tests and static-resource checks. An
-interactive screenshot-level browser QA pass was not completed because the
-configured browser-control skill file was unavailable in this environment.
-Perform that pass before the release candidate if browser tooling is available.
+interactive screenshot-level browser QA pass was attempted on 2026-07-12, but
+the browser runtime reported no available in-app browser instances. Perform
+that optional visual pass when an in-app browser instance is available.

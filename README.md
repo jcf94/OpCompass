@@ -242,7 +242,7 @@ Minimum roofline support requires:
 
 - `name`
 - `description`
-- `param_dims`
+- an explicit `OperatorSpec` describing every accepted parameter
 - `compute_flops()`
 - `compute_io_bytes()`
 
@@ -270,6 +270,11 @@ For useful pipeline mode, also define:
 - architecture-specific pipeline stages and descriptions
 
 ## TODO
+
+The current release contract and caveats are documented in the
+[v0.2 release notes](docs/releases/v0.2.md),
+[schema compatibility policy](docs/reference/schema_compatibility.md), and
+[known limitations](docs/reference/known_limitations.md).
 
 Near-term modeling work:
 

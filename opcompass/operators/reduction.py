@@ -7,7 +7,9 @@ Output: (..., 1) or (...,) depending on keepdim
 FLOPs ≈ N  (one binary-op reduction per element)
 """
 
-from opcompass.models import DataType, OperatorValidationError
+from opcompass.models import (
+    DataType, OperatorParameterSpec, OperatorSpec, OperatorValidationError,
+)
 from opcompass.operators.base import Operator
 
 
@@ -30,6 +32,13 @@ class Reduction(Operator):
             "N": "Total input elements",
             "D": "Reduction dimension size (output elements = N / D)",
         }
+
+    @property
+    def spec(self) -> OperatorSpec:
+        return OperatorSpec(self.name, (
+            OperatorParameterSpec("N", "Total input element count"),
+            OperatorParameterSpec("D", "Reduced dimension; must divide N"),
+        ))
 
     def compute_flops(self, N: int = 0, **kwargs) -> int:
         return N  # ~N-1 binary ops for tree reduction

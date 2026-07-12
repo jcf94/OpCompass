@@ -11,7 +11,7 @@ For LayerNorm:
     Total ≈ 6 * B * ... * D FLOPs
 """
 
-from opcompass.models import DataType
+from opcompass.models import DataType, OperatorParameterSpec, OperatorSpec
 from opcompass.operators.base import Operator
 
 
@@ -34,6 +34,13 @@ class LayerNorm(Operator):
             "N": "Total elements in all leading dimensions (batch * seq * …)",
             "D": "Hidden dimension (last axis)",
         }
+
+    @property
+    def spec(self) -> OperatorSpec:
+        return OperatorSpec(self.name, (
+            OperatorParameterSpec("N", "Product of all leading dimensions"),
+            OperatorParameterSpec("D", "Normalized hidden dimension"),
+        ))
 
     def compute_flops(self, N: int = 0, D: int = 0, **kwargs) -> int:
         return 6 * N * D

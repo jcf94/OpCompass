@@ -6,7 +6,8 @@ from dataclasses import replace
 
 from opcompass.models import (
     DataType, InfeasibleCandidateError, PipelineConfig,
-    PipelineKernelCandidate, SubOp, TilingInfo,
+    OperatorParameterSpec, OperatorSpec, PipelineKernelCandidate, SubOp,
+    TilingInfo,
 )
 from opcompass.operators.base import Operator
 
@@ -49,6 +50,14 @@ class Matmul(Operator):
             "N": "Cols of B / C",
             "K": "Inner dimension (cols of A, rows of B)",
         }
+
+    @property
+    def spec(self) -> OperatorSpec:
+        return OperatorSpec(self.name, (
+            OperatorParameterSpec("M", "Rows of A and C"),
+            OperatorParameterSpec("N", "Columns of B and C"),
+            OperatorParameterSpec("K", "Shared inner dimension of A and B"),
+        ))
 
     def compute_torch(self, inputs: List["torch.Tensor"], **kwargs) -> List["torch.Tensor"]:
         import torch

@@ -2,8 +2,12 @@
 
 import pytest
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
-from opcompass.server import api_analyze, api_list_operators
+from opcompass.server import api_analyze, api_list_operators, app
+
+
+client = TestClient(app, raise_server_exceptions=False)
 
 
 def test_operator_api_exposes_typed_parameter_specs():
@@ -225,3 +229,128 @@ def test_http_api_wraps_pydantic_errors_with_stable_code():
     locations = {tuple(issue["loc"]) for issue in payload["detail"]["issues"]}
     assert ("dims", "M") in locations
     assert ("unexpected",) in locations
+
+
+def test_http_analyze_success_uses_typed_json_contract():
+    response = client.post("/api/analyze", json={
+        "operator": "matmul",
+        "hardware": "a100",
+        "dtype": "fp16",
+        "dims": {"M": 128, "N": 128, "K": 128},
+    })
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    payload = response.json()
+    assert payload["schema_version"] == "0.2.0"
+    assert payload["requested_mode"] == "hierarchy_roofline"
+    assert payload["roofline_data"]["peak_flops"] > 0
+
+
+def test_http_analyze_rejects_invalid_pydantic_request():
+    response = client.post("/api/analyze", json={
+        "operator": "matmul",
+        "hardware": "a100",
+        "dims": {"M": "128", "N": 128, "K": 128},
+        "unexpected": True,
+    })
+
+    assert response.status_code == 422
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.json()["detail"]["code"] == "invalid_api_request"
+
+
+def test_http_analyze_exposes_fallback_and_strict_rejection():
+    body = {
+        "operator": "reduction",
+        "hardware": "a100",
+        "mode": "pipeline",
+        "dims": {"N": 4096, "D": 256},
+    }
+    fallback = client.post("/api/analyze", json=body)
+    rejected = client.post("/api/analyze", json={**body, "strict": True})
+
+    assert fallback.status_code == 200
+    assert fallback.json()["fallback"]["reason_code"] == "pipeline_model_unavailable"
+    assert rejected.status_code == 422
+    assert rejected.json()["detail"]["code"] == "unsupported_analysis_mode"
+
+
+@pytest.mark.parametrize(
+    ("body", "status", "code"),
+    [
+        ({"operator": "missing", "hardware": "a100", "dims": {}}, 404, "unknown_operator"),
+        ({"operator": "matmul", "hardware": "missing", "dims": {}}, 404, "unknown_hardware"),
+        ({
+            "operator": "matmul", "hardware": "a100", "dtype": "fp8",
+            "dims": {"M": 128, "N": 128, "K": 128},
+        }, 422, "unsupported_dtype"),
+        ({
+            "operator": "matmul", "hardware": "a100", "mode": "pipeline",
+            "dims": {"M": 128, "N": 128, "K": 128},
+            "pipeline_config": {"block_m": 63, "block_n": 64, "block_k": 16},
+        }, 422, "infeasible_pipeline_candidate"),
+    ],
+)
+def test_http_analyze_returns_stable_domain_errors(body, status, code):
+    response = client.post("/api/analyze", json=body)
+
+    assert response.status_code == status
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.json()["detail"]["code"] == code
+
+
+def test_http_analyze_returns_optional_backend_error(monkeypatch):
+    from opcompass.models import BackendUnavailableError
+    import opcompass.engine.solar_analyzer as solar_analyzer
+
+    def unavailable():
+        raise BackendUnavailableError("solar", ["torchview"])
+
+    monkeypatch.setattr(solar_analyzer, "_check_solar_dependencies", unavailable)
+    response = client.post("/api/analyze", json={
+        "operator": "matmul", "hardware": "a100", "mode": "solar",
+        "dims": {"M": 128, "N": 128, "K": 128},
+    })
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "optional_backend_unavailable"
+
+
+def test_http_analyze_trace_is_limited():
+    response = client.post("/api/analyze", json={
+        "operator": "matmul", "hardware": "a100", "mode": "pipeline",
+        "dims": {"M": 256, "N": 256, "K": 256},
+        "include_trace": True, "trace_limit": 2,
+    })
+
+    assert response.status_code == 200
+    schedule = response.json()["pipeline_schedule"]
+    assert len(schedule["sub_ops"]) == 2
+    assert schedule["trace"]["returned_sub_ops"] == 2
+    assert schedule["trace"]["complete"] is False
+
+
+def test_http_analyze_wraps_uncaught_internal_failure(monkeypatch):
+    def fail(*args, **kwargs):
+        raise RuntimeError("sensitive implementation detail")
+
+    monkeypatch.setattr("opcompass.server.Analyzer.analyze", fail)
+    response = client.post("/api/analyze", json={
+        "operator": "matmul", "hardware": "a100",
+        "dims": {"M": 128, "N": 128, "K": 128},
+    })
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": {
+        "code": "internal_error",
+        "message": "An unexpected internal error occurred.",
+    }}
+
+
+def test_openapi_documents_structured_analyze_errors():
+    operation = app.openapi()["paths"]["/api/analyze"]["post"]
+
+    for status in ("400", "404", "422", "500", "503"):
+        schema = operation["responses"][status]["content"]["application/json"]["schema"]
+        assert schema["$ref"].endswith("ErrorResponse")
