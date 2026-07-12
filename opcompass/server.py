@@ -128,8 +128,13 @@ def api_list_hardware() -> List[Dict[str, Any]]:
             "vendor": inst.vendor,
             "description": inst.description,
             "spec_version": inst.spec_version,
+            "provenance_status": inst.provenance_status,
+            "provenance": inst.provenance(),
             "architecture": getattr(inst, "architecture", ""),
             "sm_version": getattr(inst, "sm_version", ""),
+            "spec_version": inst.spec_version,
+            "provenance_status": inst.provenance_status,
+            "provenance": inst.provenance(),
             "num_sms": inst.num_compute_units,
             "clock_mhz": inst.compute_unit.clock_mhz,
             "hbm_bandwidth_gb_s": inst.hbm_bandwidth / 1e9,
@@ -255,6 +260,9 @@ def api_get_hardware(name: str) -> Dict[str, Any]:
         "description": inst.description,
         "architecture": getattr(inst, "architecture", ""),
         "sm_version": getattr(inst, "sm_version", ""),
+        "spec_version": inst.spec_version,
+        "provenance_status": inst.provenance_status,
+        "provenance": inst.provenance(),
         # ── Memory hierarchy ─────────────────────────────────
         "memory_tiers": [
             {

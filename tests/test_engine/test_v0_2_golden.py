@@ -32,9 +32,13 @@ def test_matmul_pipeline_compact_golden(hardware_name):
     assert serialized["estimate_kind"] == "analytical_model"
     assert serialized["support_level"] == "pipeline"
     assert serialized["model_id"] == "legacy_matmul_v1"
-    assert serialized["implementation_version"] == "0.4.0.dev0"
+    assert serialized["implementation_version"] == "0.5.0.dev0"
     assert serialized["implementation_revision"]
-    assert serialized["hardware_spec_version"] == "legacy-v1"
+    assert serialized["hardware_spec_version"] == {
+        "a100": "nvidia-a100-v1",
+        "h100": "nvidia-h100-sxm-v1",
+        "b200": "nvidia-b200-v1",
+    }[hardware_name]
     assert serialized["evidence"]["coverage"] == "analytical_model"
     assert serialized["uncertainty"]["status"] == "unquantified"
     assert serialized["total_flops"] == 33_554_432

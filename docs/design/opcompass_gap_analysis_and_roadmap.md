@@ -734,6 +734,12 @@ Exit criteria:
 
 ### V0.5 — Hardware provenance and matmul validation
 
+Implementation status (2026-07-12): versioned hardware facts and provenance
+API output, the canonical measurement schema, generic/CUTLASS importers, raw
+grouped accuracy metrics, and a transparent scale overlay are implemented. No
+accuracy target is declared without baseline measurement data. See
+[`../releases/v0.5.md`](../releases/v0.5.md).
+
 Goal: establish the evidence loop before broad operator expansion.
 
 Work packages:

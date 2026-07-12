@@ -340,6 +340,7 @@ When adding a new hardware target, work through this list:
 from __future__ import annotations
 
 from abc import ABC
+from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -348,6 +349,20 @@ if TYPE_CHECKING:
         DataType,
         MemoryHierarchy,
     )
+
+
+@dataclass(frozen=True)
+class HardwareFact:
+    """One versioned hardware input with evidence and modeling status."""
+
+    field: str
+    value: object
+    unit: str
+    source_url: str
+    source_title: str
+    source_kind: str = "primary"
+    verified_on: str = "2026-07-12"
+    status: str = "published"  # published | assumption | calibrated | provisional
 
 
 class Hardware(ABC):
@@ -385,6 +400,7 @@ class Hardware(ABC):
     vendor: str = ""
     description: str = ""
     spec_version: str = "legacy-v1"
+    facts: tuple[HardwareFact, ...] = ()
 
     # Subclasses override these with actual objects
     memory: MemoryHierarchy
@@ -397,6 +413,14 @@ class Hardware(ABC):
     def get_peak_flops(self, dtype: DataType) -> float:
         """Peak FLOPS for *dtype* on the full chip."""
         return self.compute_unit.peak_flops.get(dtype, 0.0)
+
+    def provenance(self) -> list[dict]:
+        """Return JSON-ready provenance, including an explicit audit status."""
+        return [asdict(fact) for fact in self.facts]
+
+    @property
+    def provenance_status(self) -> str:
+        return "audited" if self.facts and all(f.status != "provisional" for f in self.facts) else "provisional"
 
     def get_bandwidth(self, tier_name: str) -> float:
         """Bandwidth in bytes/sec for the named memory tier."""
